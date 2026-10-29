@@ -296,5 +296,17 @@ They exercise mock importer and image-tool behavior, runtime verification, execu
 python3 -m unittest discover -s tests/release -p 'test_*.py'
 ```
 
+The Linux fresh-user runner accepts an AppImage or AppDir and requires its expected digest, the installed game, and a source checkout with renderer helper sources.
+It runs all nine shared cases without skips against a read-only isolated copy and writes `suites.log`, `fresh-user-receipt.json`, and `fresh-user-verdict.json` under an empty output directory.
+Use it for both player and Debug artifacts on a Linux graphics desktop with the actual game and GPU available.
+AppImage input is extracted by the runner, so also test mounted AppImage startup separately when validating FUSE behavior.
+
+```sh
+python3 tools/release/fresh_user/run_linux_fresh_user.py \
+  --package out/release/eaw-revised-vVERSION-linux-x64-player.AppImage \
+  --kind player --expected-sha256 "$PLAYER_SHA256" \
+  --game-root "$EAW_GAME_ROOT" --source . --out out/fresh-user-player
+```
+
 Before publishing, test the actual image on the minimum supported distribution, both mounted and extracted, with the project files read-only.
 Check normal startup, safe render-thread startup, game-path selection, font extraction, mod-service startup, and a representative scene.

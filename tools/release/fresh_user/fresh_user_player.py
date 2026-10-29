@@ -1,4 +1,6 @@
-"""Fresh-user check of the Windows player (or debug) archive, run on a private GPU desktop of a rig host.
+"""Shared nine-case fresh-user check of extracted player or debug packages.
+
+Linux: run through run_linux_fresh_user.py on a graphics desktop with renderer fixture sources.
 
 Rig: copy to tests/presentation/renderer/test_release_player_fresh_user.py (never committed), stage the archive
 with -ExtraArtifact and run through Invoke-RigSuite. Environment:
@@ -32,6 +34,9 @@ EXTENSION = 'libeawr_viewer.windows.template_release.x86_64.dll'
 class PlayerFreshUser(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if os.environ.get('EAWR_JOB_RELEASE_PLATFORM') == 'linux-x64':
+            cls.setUpLinux()
+            return
         cls.source = Path(os.environ.get('EAWR_JOB_RELEASE_SOURCE') or next(
             str(p) for p in Path(__file__).resolve().parents
             if (p / 'tests/presentation/renderer').is_dir() and (p / 'apps/viewer').is_dir()))
@@ -64,18 +69,44 @@ class PlayerFreshUser(unittest.TestCase):
         sys.path.insert(0, str(cls.source))
 
     @classmethod
+    def setUpLinux(cls):
+        # The runner owns extraction, isolation and cleanup. Never discover a host Godot.
+        cls.source = Path(os.environ['EAWR_JOB_RELEASE_SOURCE'])
+        cls.output = Path(os.environ['EAWR_JOB_RELEASE_OUT'])
+        cls.archive = Path(os.environ['EAWR_JOB_RELEASE_PACKAGE'])
+        cls.package = Path(os.environ['EAWR_JOB_RELEASE_EXTRACTED'])
+        cls.kind = os.environ['EAWR_JOB_RELEASE_KIND']
+        sys.path.insert(0, str(cls.source / 'tools/release'))
+        import package_linux_player as linux
+        cls.godot = cls.package / linux.GODOT_NAME
+        cls.rig_godot = cls.godot.resolve()
+        cls.extension = linux.EXTENSION
+        cls.launcher_name = 'EAWR'
+        cls.game = os.environ['EAWR_EAW_GAME_ROOT']
+        cls.env = json.loads(os.environ['EAWR_JOB_RELEASE_ENV'])
+        cls.user_data = Path(cls.env['XDG_DATA_HOME']) / 'godot/app_userdata/EAWR Viewer'
+        cls.records = []
+        sys.path.insert(0, str(cls.source / 'tests/presentation/renderer'))
+        sys.path.insert(0, str(cls.source))
+
+    @classmethod
+    def is_linux(cls):
+        return os.environ.get('EAWR_JOB_RELEASE_PLATFORM') == 'linux-x64'
+
+    @classmethod
     def tearDownClass(cls):
-        extension = cls.package / 'project/bin' / EXTENSION
+        extension = cls.package / 'project/bin' / getattr(cls, 'extension', EXTENSION)
         (cls.output / 'fresh-user-receipt.json').write_text(json.dumps({
             'kind': cls.kind,
-            'archive_sha256': hashlib.sha256(cls.archive.read_bytes()).hexdigest(),
+            'archive_sha256': (os.environ['EAWR_JOB_RELEASE_SHA256'] if cls.is_linux()
+                               else hashlib.sha256(cls.archive.read_bytes()).hexdigest()),
             'extension_sha256': hashlib.sha256(extension.read_bytes()).hexdigest(),
-            'launcher_sha256': hashlib.sha256((cls.package / 'EAWR.exe').read_bytes()).hexdigest(),
+            'launcher_sha256': hashlib.sha256((cls.package / getattr(cls, 'launcher_name', 'EAWR.exe')).read_bytes()).hexdigest(),
             'package': str(cls.archive), 'extracted': str(cls.package),
             'restricted_path': cls.env['PATH'], 'launches': cls.records,
         }, indent=2) + '\n', encoding='utf-8')
 
-    def test_native_manager_entry(self):
+    def check_native_manager_entry(self):
         self.assertFalse(list(self.package.rglob("*.vbs")))
         if not (self.package / 'launcher').is_dir():
             return  # Manager is an optional package component.
@@ -100,14 +131,31 @@ class PlayerFreshUser(unittest.TestCase):
         return result, out
 
     def launcher(self, name, extra):
-        result, out = self.run_process(name, [str(self.package / 'EAWR.exe'), '--no-dialogs', '--game-root', self.game,
+        result, out = self.run_process(name, [str(self.package / getattr(self, 'launcher_name', 'EAWR.exe')), '--no-dialogs', '--game-root', self.game,
                                               '--user-data', str(self.user_data), '--godot-quit-after', '600', *extra])
         return result, out
 
     def test_01_archive_integrity(self):
+        self.check_package_sums()
+        runtime = json.loads((self.package / 'runtime.json').read_text(encoding='utf-8'))
+        self.assertEqual(runtime.get('variant', 'player'), self.kind)
+        self.assertTrue(self.godot.is_file())
+        self.assertFalse(list((self.package / 'godot').glob('*console*')))
+        if self.is_linux():
+            self.check_linux_runtime(runtime)
+        if self.kind == 'debug':
+            self.assertTrue((self.package / 'DEBUG-BUILD.md').is_file())
+            if not self.is_linux():
+                self.assertTrue(list((self.package / 'project/bin').glob('*.pdb')))
+                self.assertTrue((self.package / 'tools/sim_headless.exe').is_file())
+        if not self.is_linux():
+            self.check_native_manager_entry()
+
+    def check_package_sums(self):
         sums = {}
         for line in (self.package / 'SHA256SUMS').read_text(encoding='utf-8').splitlines():
             digest, name = line.split('  ', 1)
+            self.assertNotIn(name, sums, 'duplicate checksum entry')
             sums[name] = digest
         files = {p.relative_to(self.package).as_posix() for p in self.package.rglob('*')
                  if p.is_file() and p.name != 'SHA256SUMS'}
@@ -116,14 +164,39 @@ class PlayerFreshUser(unittest.TestCase):
             self.assertEqual(hashlib.sha256((self.package / name).read_bytes()).hexdigest(), digest, name)
         self.assertFalse([n for n in files if n.lower().endswith(('.ttf', '.otf', '.meg', '.tga'))
                           or n.lower().endswith('starwarsg.exe')], 'no game files')
-        runtime = json.loads((self.package / 'runtime.json').read_text(encoding='utf-8'))
-        self.assertEqual(runtime.get('variant', 'player'), self.kind)
-        self.assertTrue((self.package / 'godot' / GODOT_NAME).is_file())
-        self.assertFalse(list((self.package / 'godot').glob('*console*')))
+
+    def check_linux_runtime(self, runtime):
+        import package_linux_player as linux
+        self.assertEqual(runtime['platform'], 'linux-x64')
+        self.assertEqual(runtime['variant'], self.kind)
+        for name in ('AppRun', 'EAWR', 'EAWR (Safe render thread)', 'EAWR Mods', 'run.sh',
+                     'eawr-launcher', 'eawr_mods_service', 'eawr_loadcheck'):
+            self.assertTrue(os.access(self.package / name, os.X_OK), name)
+        for name, target in (('EAWR', 'AppRun'), ('EAWR (Safe render thread)', 'AppRun'),
+                             ('EAWR Mods', 'run.sh'), ('AppRun', 'eawr-launcher')):
+            self.assertIn(target, (self.package / name).read_text(encoding='utf-8'))
+        self.assertIn('--safe-render-thread', (self.package / 'EAWR (Safe render thread)').read_text())
+        for name in ('eawr-launcher', 'eawr_mods_service', 'eawr_loadcheck'):
+            self.assertTrue(linux.is_elf(self.package / name), name)
+        result, _ = self.run_process('godot-version', [str(self.godot), '--headless', '--version'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), linux.GODOT_IDENTITY)
+        self.assertEqual(hashlib.sha256(self.godot.read_bytes()).hexdigest(), runtime['godot']['sha256'])
         if self.kind == 'debug':
-            self.assertTrue(list((self.package / 'project/bin').glob('*.pdb')))
-            self.assertTrue((self.package / 'tools/sim_headless.exe').is_file())
-            self.assertTrue((self.package / 'DEBUG-BUILD.md').is_file())
+            self.assertEqual(runtime['configuration'], 'Debug')
+            self.assertEqual(set(runtime['tools_sha256']), set(linux.release.TOOLS))
+            binaries = [self.package / 'project/bin' / self.extension]
+            for name, digest in runtime['tools_sha256'].items():
+                binary = self.package / 'tools' / name
+                self.assertEqual(hashlib.sha256(binary.read_bytes()).hexdigest(), digest, name)
+                binaries.append(binary)
+            for binary in binaries:
+                self.assertTrue(linux.is_elf(binary), str(binary))
+                result, _ = self.run_process('symbols-' + binary.name,
+                                             ['/usr/bin/readelf', '--section-headers', '--wide', str(binary)])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for section in ('.debug_info', '.debug_line'):
+                    self.assertIn(section, result.stdout, str(binary))
 
     def test_02_launcher_first_start_reaches_front_end(self):
         result, out = self.launcher('first', [])
@@ -146,6 +219,8 @@ class PlayerFreshUser(unittest.TestCase):
         listing = sorted(p.relative_to(self.package).as_posix() for p in self.package.rglob('*') if p.is_file())
         sums = {l.split('  ', 1)[1] for l in (self.package / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()}
         self.assertEqual(set(listing) - {'SHA256SUMS'}, sums, 'runs wrote nothing into the package folder')
+        if self.is_linux():
+            self.check_package_sums()
 
     def viewer(self, name, args, ticks_frames=None):
         out = self.output / name
@@ -208,6 +283,7 @@ class PlayerFreshUser(unittest.TestCase):
         original = self._original_run
         if isinstance(args, (list, tuple)) and args and Path(str(args[0])).resolve() == self.rig_godot:
             args = list(args)
+            args[0] = str(self.godot)
             args[args.index('--path') + 1] = str(self.package / 'project')
             kwargs['cwd'] = self.package
             kwargs['env'] = self.env

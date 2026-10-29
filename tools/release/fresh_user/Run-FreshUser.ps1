@@ -147,7 +147,7 @@ try {
     $verdict.cases_passed = $passed; $verdict.cases_failed = $failed; $verdict.receipt_matches_archive = $receiptOk
     $verdict.adapter = $adapter; $verdict.files_naming_adapter = $gpuSeen
     $verdict.expected_cases = $expected
-    $verdict.result = if ($passed -eq $expected -and $failed -eq 0 -and $receiptOk -and $gpuSeen -gt 0) { "PASS $passed/$expected" } else { 'FAIL' }
+    $verdict.result = if ($suiteExit -eq 0 -and $passed -eq $expected -and $failed -eq 0 -and $receiptOk -and $gpuSeen -gt 0) { "PASS $passed/$expected" } else { 'FAIL' }
     ($verdict | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath (Join-Path $evidence 'fresh-user-verdict.json') -Encoding utf8
     Write-Host ("fresh-user {0}: {1} (cases {2} passed / {3} failed, receipt ok {4}, adapter named in {5} files; Invoke-RigSuite exit {6}); {7}" -f $Kind, $verdict.result, $passed, $failed, $receiptOk, $gpuSeen, $suiteExit, $evidence)
 } finally {
