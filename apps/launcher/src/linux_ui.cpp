@@ -69,4 +69,12 @@ private:
 std::unique_ptr<Ui> make_linux_ui(bool headless) {
     return std::make_unique<LinuxUi>(!headless && gtk_init_check(nullptr, nullptr));
 }
+
+bool linux_shift_pressed(bool headless) {
+    if (headless) return false;
+    GdkDisplay* display = gdk_display_get_default();
+    if (!display) return false;
+    GdkKeymap* keymap = gdk_keymap_get_for_display(display);
+    return keymap && (gdk_keymap_get_modifier_state(keymap) & GDK_SHIFT_MASK) != 0;
+}
 }

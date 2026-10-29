@@ -71,10 +71,15 @@ Choosing Mods without the manager package shows an explanation and leaves Play a
 1. **Finds Forces of Corruption**: checks `~/.steam/steam`, `~/.steam/root`, `~/.local/share/Steam`,
    `$XDG_DATA_HOME/Steam` and the Flatpak `.local/share/Steam` and `data/Steam` locations under
    `~/.var/app/com.valvesoftware.Steam`. Shared Steam utilities expand `libraryfolders.vdf`, read app
-   manifests and scan library folders. One valid installation is used automatically. Several or no
-   installations, or `--choose-game`, open the chooser with manual folder selection. Without a display,
+    manifests and scan library folders. One valid installation is used automatically. Several or no
+    installations, or `--choose-game`, open the chooser with manual folder selection. It also searches GOG
+    installs under the absolute `WINEPREFIX` (or `~/.wine`) in `drive_c/GOG Games`,
+    `Program Files/GOG Galaxy/Games`, and `Program Files (x86)/GOG Galaxy/Games`. Heroic and Lutris installs
+    can be selected manually or passed with `--game-root`. Without a display,
    errors go to stderr and a choice-requiring discovery exits with cancellation and a `--game-root` hint.
-2. **Starts the viewer**: passes `--render-thread safe` or `--render-thread separate` through to override
+2. **Starts the viewer**: in GTK desktop mode, holding Shift at startup asks for a game installation even when
+   one is already saved. Headless mode has no key-state detection; use `--choose-game` or `--game-root`.
+   The launcher passes `--render-thread safe` or `--render-thread separate` through to override
    the saved Performance setting. `--safe-render-thread` remains the Safe alias. Settings, launcher state
    and font provisioning use the existing Godot XDG layout under
    `$XDG_DATA_HOME/godot/app_userdata/EAWR Viewer`, falling back to

@@ -60,6 +60,28 @@ bool is_single_component(const fs::path& name) {
     return !name.empty() && name.has_filename() && !name.has_parent_path() && !name.has_root_name() && name != "." && name != "..";
 }
 
+#ifndef _WIN32
+void add_wine_gog_candidates(std::vector<Candidate>& candidates) {
+    fs::path prefix;
+    if (const char* value = std::getenv("WINEPREFIX"); value && *value) {
+        prefix = path_from_utf8(value);
+    } else if (const char* home = std::getenv("HOME"); home && *home) {
+        prefix = path_from_utf8(home) / ".wine";
+    }
+    if (!prefix.is_absolute()) return;
+    // Only known store directories in this prefix, never a recursive prefix/home scan.
+    for (const auto* suffix : {"GOG Games", "Program Files/GOG Galaxy/Games", "Program Files (x86)/GOG Galaxy/Games"}) {
+        const fs::path games = prefix / "drive_c" / suffix;
+        std::error_code error;
+        for (fs::directory_iterator iterator(games, fs::directory_options::skip_permission_denied, error), end;
+             !error && iterator != end; iterator.increment(error)) {
+            std::error_code type_error;
+            if (iterator->is_directory(type_error)) add_candidate(candidates, iterator->path(), "GOG (Wine)", true);
+        }
+    }
+}
+#endif
+
 struct RootCheck {
     bool ok = false;
     fs::path root;
@@ -162,6 +184,10 @@ std::vector<Candidate> find_candidates(const RegistryReader& registry) {
             if (iterator->is_directory(type_error)) add_candidate(candidates, iterator->path(), "Steam", false);
         }
     }
+
+#ifndef _WIN32
+    add_wine_gog_candidates(candidates);
+#endif
 
     // GOG: the game records, then uninstall records (Galaxy and the classic installer), both views.
     for (const RegistryView view : {RegistryView::view64, RegistryView::view32}) {

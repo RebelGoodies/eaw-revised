@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
         if (options.help) {
             std::cout << "eawr-launcher [options]\n"
                 "  --game-root <folder>    Forces of Corruption folder containing GameData and corruption\n"
-                "  --choose-game           choose another installation\n"
+                "  --choose-game           choose another installation (also: hold Shift while starting)\n"
                 "  --godot <file>          override bundled Godot 4.7.2\n"
                 "  --project <folder>      override bundled project\n"
                 "  --user-data <folder>    override launcher state/log location\n"
@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
             return kExitOk;
         }
         auto ui = make_linux_ui(headless);
+        if (linux_shift_pressed(headless)) options.choose_game = true;
         auto registry = make_linux_registry();
         auto runner = make_linux_process_runner();
         Log log(options.user_data.empty() ? fs::path{} : options.user_data / "launcher" / "launcher.log");

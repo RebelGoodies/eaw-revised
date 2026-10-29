@@ -29,7 +29,7 @@ inline constexpr unsigned kSteamAppIds[] = {32470};
 
 struct Candidate {
     fs::path path;
-    std::string source;   // "Steam", "GOG", "Windows uninstall entry"
+    std::string source;   // "Steam", "GOG", "GOG (Wine)", "Windows uninstall entry"
     bool nested_ok = false; // a GOG-style folder may hold the game one level down
 };
 
@@ -57,7 +57,7 @@ struct Validation {
 // All valid installs from Steam and GOG, deduplicated by location.
 [[nodiscard]] std::vector<Install> discover_installs(const RegistryReader& registry);
 #ifndef _WIN32
-// Native Linux Steam discovery, also usable by the service without platform UI/process objects.
+// Native Linux Steam and default/explicit Wine-prefix GOG discovery, also usable by the service.
 [[nodiscard]] std::vector<Install> discover_installs();
 #endif
 

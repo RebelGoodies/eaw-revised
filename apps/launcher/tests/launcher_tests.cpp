@@ -528,6 +528,9 @@ void test_flow_explicit_game_root() {
     for (const std::wstring& argument : args) CHECK(argument.find(L"console") == std::wstring::npos && argument.find(L"font") == std::wstring::npos);
     CHECK(!load_state(f.user_data).game_root);   // an explicit folder is a one-off: not remembered
     CHECK(f.ui.picks.empty());
+    options.choose_game = true;
+    CHECK(f.run(options) == kExitOk);
+    CHECK(f.ui.picks.empty()); // An explicit root still wins over the startup Shift shortcut.
 }
 
 void test_render_thread_precedence() {
@@ -883,6 +886,12 @@ void test_flow_one_discovered_install_is_used_silently() {
     CHECK(f.ui.picks.empty());
     CHECK(f.runner.calls == 1);
     CHECK(same_location(*load_state(f.user_data).game_root, game));
+
+    Options options = f.options();
+    options.choose_game = true;
+    f.ui.pick_answers = {{Ui::Pick::Kind::install, 0}};
+    CHECK(f.run(options) == kExitOk);
+    CHECK(f.ui.picks.size() == 1 && f.ui.picks[0].first == 1);
 }
 
 void test_flow_several_installs_ask() {
@@ -1103,6 +1112,11 @@ void test_project_name_matches_godot_project(const fs::path& project_godot) {
 
 int main(int argc, char** argv) {
 #ifndef _WIN32
+    if (argc >= 2 && std::string(argv[1]) == "--linux-shift-probe") {
+        const bool headless = argc >= 3 && std::string(argv[2]) == "--no-dialogs";
+        auto ui = make_linux_ui(headless);
+        return linux_shift_pressed(headless) ? 1 : 0;
+    }
     if (argc > 1 && std::string(argv[1]) == "--path") {
         fs::path output;
         for (int i = 2; i + 1 < argc; ++i) {
@@ -1195,6 +1209,9 @@ int main(int argc, char** argv) {
     Scratch environment;
     setenv("HOME", environment.path().c_str(), 1);
     setenv("XDG_DATA_HOME", (environment.path() / "xdg").c_str(), 1);
+    unsetenv("WINEPREFIX");
+    CHECK(!linux_shift_pressed(true));
+    CHECK(!linux_shift_pressed(false)); // GTK has not opened a display.
     {
         const std::wstring unicode = L"/caf\u00e9/\u65e5\u672c/\U0001f680";
         CHECK(path_to_wide(path_from_wide(unicode)) == unicode);
@@ -1232,6 +1249,38 @@ int main(int argc, char** argv) {
         fs::remove_all(flatpak);
         fs::remove_all(additional);
         fs::remove_all(environment.path() / "xdg/Steam");
+
+        const fs::path default_prefix = environment.path() / ".wine";
+        const fs::path classic = make_install(default_prefix / "drive_c/GOG Games/Star Wars Empire at War Gold");
+        const auto default_gog = discover_installs(*registry);
+        CHECK(default_gog.size() == 1);
+        if (default_gog.size() == 1) {
+            CHECK(same_location(default_gog.front().root, classic));
+            CHECK(default_gog.front().source == "GOG (Wine)");
+        }
+        const fs::path prefix = environment.path() / "custom Wine prefix";
+        const fs::path galaxy = make_install(prefix / "drive_c/Program Files/GOG Galaxy/Games/Empire at War/Game");
+        const fs::path galaxy32 = make_install(prefix / "drive_c/Program Files (x86)/GOG Galaxy/Games/Empire at War");
+        fs::create_directories(prefix / "drive_c/GOG Games/Base game only/GameData/Data");
+        make_install(prefix / "drive_c/Other Games/Not a supported store directory");
+        write_file(prefix / "drive_c/GOG Games/Incomplete/corruption/StarWarsG.exe", kFakeExe);
+        fs::create_directories(prefix / "drive_c/GOG Games");
+        fs::create_directory_symlink(galaxy32, prefix / "drive_c/GOG Games/duplicate");
+        setenv("WINEPREFIX", prefix.c_str(), 1);
+        const auto wine_gog = discover_installs();
+        CHECK(wine_gog.size() == 2);
+        for (const auto& root : {galaxy, galaxy32})
+            CHECK(std::any_of(wine_gog.begin(), wine_gog.end(), [&](const Install& i) {
+                return same_location(i.root, root) && i.source == "GOG (Wine)";
+            }));
+        setenv("WINEPREFIX", "relative prefix", 1);
+        CHECK(discover_installs().empty());
+        setenv("WINEPREFIX", (environment.path() / "missing prefix").c_str(), 1);
+        CHECK(discover_installs().empty());
+        unsetenv("WINEPREFIX");
+        CHECK(discover_installs().size() == 1);
+        fs::remove_all(default_prefix);
+        fs::remove_all(prefix);
 
         auto runner = make_linux_process_runner();
         const fs::path result = environment.path() / "process output";
