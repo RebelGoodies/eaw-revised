@@ -15,7 +15,11 @@ inline ModsStartMode mods_start_mode(std::span<const std::wstring_view> argument
 }
 
 inline std::filesystem::path mods_launcher_path(const std::filesystem::path& own_executable) {
+#ifdef _WIN32
     return own_executable.parent_path() / L"EAWR.exe";
+#else
+    return own_executable.parent_path() / "eawr-launcher";
+#endif
 }
 
 } // namespace eawr::launcher

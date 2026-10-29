@@ -15,7 +15,12 @@ inline constexpr int kExitError = 2;
 inline constexpr int kExitCancelled = 3;
 // A Godot exit with a non-zero code inside this window gets an error dialog.
 inline constexpr double kEarlyExitSeconds = 60.0;
-inline constexpr const char* kGodotExecutableName = "Godot_v4.7.2-stable_win64.exe";
+inline constexpr const char* kGodotExecutableName =
+#ifdef _WIN32
+    "Godot_v4.7.2-stable_win64.exe";
+#else
+    "Godot_v4.7.2-stable_linux.x86_64";
+#endif
 
 struct Options {
     std::optional<fs::path> game_root;     // --game-root, else EAWR_EAW_GAME_ROOT

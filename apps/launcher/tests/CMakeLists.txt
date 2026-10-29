@@ -6,7 +6,14 @@ target_link_libraries(launcher_tests PRIVATE eawr_launcher_core)
 set_target_properties(launcher_tests PROPERTIES MSVC_RUNTIME_LIBRARY "${EAWR_LAUNCHER_RUNTIME}")
 eawr_target_project_warnings(launcher_tests)
 add_test(NAME launcher_core_contracts COMMAND launcher_tests "${PROJECT_SOURCE_DIR}/apps/viewer/project/project.godot")
+if(NOT WIN32)
+    add_test(NAME launcher_linux_smoke COMMAND launcher_tests --linux-launcher-smoke
+        "$<TARGET_FILE:eawr_launcher>" "$<TARGET_FILE:eawr_mods_start>")
+    set_tests_properties(launcher_linux_smoke PROPERTIES TIMEOUT 60)
+endif()
 
+# Windows smoke helpers use Win32 APIs. Linux exercises real exec/wait in launcher_tests.
+if(WIN32)
 # Console-subsystem on purpose (see the file header).
 add_executable(launcher_fake_godot fake_godot.cpp)
 target_link_libraries(launcher_fake_godot PRIVATE eawr_launcher_core)
@@ -28,5 +35,6 @@ add_test(NAME mods_start_smoke
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/mods_start_smoke.py"
             "$<TARGET_FILE:eawr_mods_start>" "$<TARGET_FILE:launcher_fake_godot>")
 set_tests_properties(mods_start_smoke PROPERTIES TIMEOUT 120)
+endif()
 
 eawr_label_tests()

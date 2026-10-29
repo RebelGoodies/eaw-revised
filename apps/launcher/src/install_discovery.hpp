@@ -56,6 +56,10 @@ struct Validation {
 
 // All valid installs from Steam and GOG, deduplicated by location.
 [[nodiscard]] std::vector<Install> discover_installs(const RegistryReader& registry);
+#ifndef _WIN32
+// Native Linux Steam discovery, also usable by the service without platform UI/process objects.
+[[nodiscard]] std::vector<Install> discover_installs();
+#endif
 
 // Appends `install` unless the same place is already listed.
 void add_unique(std::vector<Install>& installs, Install install);

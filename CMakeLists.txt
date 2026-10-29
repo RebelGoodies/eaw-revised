@@ -26,6 +26,7 @@ set(EAWR_EXPECTED_ARCH "" CACHE STRING "Expected host architecture: x64 or arm64
 # Debug information in optimised MSVC and clang-cl builds, for profiling (path_bench --melee --profile,
 # docs/worker-offload.md#benchmarks-and-profiles). It changes no generated code.
 option(EAWR_DEBUG_SYMBOLS "Emit PDBs for shipped Windows binaries" OFF)
+option(EAWR_BUILD_PLAYER "Build the native player launcher and mod helpers (Linux requires GTK 3)" ${WIN32})
 
 if(EAWR_EXPECTED_ARCH)
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" EAWR_SYSTEM_PROCESSOR_LOWER)
@@ -85,13 +86,15 @@ add_subdirectory(apps/scene_scan)
 add_subdirectory(apps/sky_scan)
 add_subdirectory(apps/unit_scan)
 add_subdirectory(apps/hud_movie_prepare)
-if(WIN32)
+if(EAWR_BUILD_PLAYER)
     # EAWR.exe, the first-run launcher of the player package (#3962).
     add_subdirectory(apps/launcher)
-    # eawr_mods_service, the mod manager's stdio service. Portable code; Windows-only until the Linux launch
-    # loop needs it and a Linux build covers it.
-    add_subdirectory(apps/mods_service)
-    add_subdirectory(apps/mods_loadcheck)
+    if(WIN32)
+        # eawr_mods_service, the mod manager's stdio service. Portable code; Windows-only until the Linux launch
+        # loop needs it and a Linux build covers it.
+        add_subdirectory(apps/mods_service)
+        add_subdirectory(apps/mods_loadcheck)
+    endif()
 endif()
 if(EAWR_ENABLE_RELAY)
     add_subdirectory(apps/relay_server)
@@ -105,7 +108,7 @@ endif()
 if(MSVC)
     set(EAWR_SYMBOL_TARGETS sim_headless sim_bench path_bench asset_scan asset_validate
         xml_scan scene_scan sky_scan unit_scan script_smoke hud_movie_prepare)
-    if(WIN32)
+    if(WIN32 AND EAWR_BUILD_PLAYER)
         list(APPEND EAWR_SYMBOL_TARGETS eawr_launcher eawr_mods_start)
     endif()
     set(EAWR_SYMBOL_INPUTS "")
@@ -138,9 +141,11 @@ if(BUILD_TESTING)
     add_subdirectory(tests/script)
     add_subdirectory(tests/data)
     add_subdirectory(tests/ci)
-    if(WIN32)
+    if(EAWR_BUILD_PLAYER)
         add_subdirectory(apps/launcher/tests)
-        add_subdirectory(tests/mods_service)
+        if(WIN32)
+            add_subdirectory(tests/mods_service)
+        endif()
     endif()
     add_subdirectory(tests/presentation/particles)
     add_subdirectory(tests/presentation/animation)

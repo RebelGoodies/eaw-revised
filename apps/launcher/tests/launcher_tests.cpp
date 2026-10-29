@@ -9,8 +9,15 @@
 #include "launcher_state.hpp"
 #include "text_formats.hpp"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include "linux_platform.hpp"
+#include <unistd.h>
+#include <cstdlib>
+#include <csignal>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -50,8 +57,13 @@ class Scratch {
 public:
     Scratch() {
         static std::atomic<int> counter{0};
-        root_ = fs::temp_directory_path() / (L"eawr launcher caf\u00e9 \u65e5\u672c\u8a9e " + std::to_wstring(GetCurrentProcessId()) + L"-"
-                                             + std::to_wstring(counter++));
+        root_ = fs::temp_directory_path() / path_from_wide(L"eawr launcher caf\u00e9 \u65e5\u672c\u8a9e " + std::to_wstring(
+#ifdef _WIN32
+            GetCurrentProcessId()
+#else
+            getpid()
+#endif
+        ) + L"-" + std::to_wstring(counter++));
         fs::create_directories(root_);
     }
     ~Scratch() {
@@ -147,13 +159,17 @@ std::string vdf_escaped(const fs::path& path) {
 
 void test_validation() {
     Scratch scratch;
-    const fs::path game = make_install(scratch.path() / L"Star Wars Empire at War caf\u00e9");
+    const fs::path game = make_install(scratch.path() / path_from_wide(L"Star Wars Empire at War caf\u00e9"));
     auto ok = validate_install(game);
     CHECK(ok.ok && same_location(ok.root, game));
     // Normalisation: the expansion folder, GameData, a trailing separator and surrounding quotes.
     CHECK(validate_install(game / "corruption").ok && same_location(validate_install(game / "corruption").root, game));
     CHECK(validate_install(game / "GameData").ok && same_location(validate_install(game / "GameData").root, game));
+#ifdef _WIN32
     CHECK(validate_install(path_from_utf8("\"" + path_to_utf8(game) + "\\\"")).ok);
+#else
+    CHECK(validate_install(path_from_utf8("\"" + path_to_utf8(game) + "/\"")).ok);
+#endif
     CHECK(validate_install(path_from_utf8(path_to_utf8(game / "CORRUPTION"))).ok);   // case
 
     // One level down (a GOG-style wrapper folder), only where allowed.
@@ -210,8 +226,8 @@ std::string app_manifest(const std::string& installdir) {
 
 void test_steam_modern_and_legacy() {
     Scratch scratch;
-    const fs::path steam = scratch.path() / L"Steam caf\u00e9";
-    const fs::path library2 = scratch.path() / L"Bibliothek \u65e5\u672c";
+    const fs::path steam = scratch.path() / path_from_wide(L"Steam caf\u00e9");
+    const fs::path library2 = scratch.path() / path_from_wide(L"Bibliothek \u65e5\u672c");
     const fs::path game = make_install(library2 / "steamapps" / "common" / "Star Wars Empire at War");
     write_file(library2 / "steamapps" / "appmanifest_32470.acf", app_manifest("Star Wars Empire at War"));
     fs::create_directories(steam / "steamapps" / "common");
@@ -271,7 +287,7 @@ void test_steam_without_manifest_scans_common() {
 void test_gog_records() {
     Scratch scratch;
     const fs::path game_record = make_install(scratch.path() / "GOG Games" / "Star Wars - Empire at War - Gold Pack");
-    const fs::path uninstall_game = make_install(scratch.path() / "Galaxy" / "Games" / L"Empire at War caf\u00e9");
+    const fs::path uninstall_game = make_install(scratch.path() / "Galaxy" / "Games" / path_from_wide(L"Empire at War caf\u00e9"));
     const fs::path derived_game = make_install(scratch.path() / "Derived" / "EaW");
     const fs::path nested_wrapper = scratch.path() / "Wrapper";
     const fs::path nested_game = make_install(nested_wrapper / "inner");
@@ -367,6 +383,7 @@ void test_state() {
 
 // --- Godot command line -----------------------------------------------------------------------
 
+#ifdef _WIN32
 std::vector<std::wstring> parse_back(const std::wstring& line) {
     int count = 0;
     LPWSTR* argv = CommandLineToArgvW(line.c_str(), &count);
@@ -375,15 +392,16 @@ std::vector<std::wstring> parse_back(const std::wstring& line) {
     LocalFree(argv);
     return out;
 }
+#endif
 
 void test_launch_plan() {
     LaunchInputs inputs;
-    inputs.project = L"C:\\Spiele\\EAWR caf\u00e9\\project";
-    inputs.game_root = L"D:\\Games\\Star Wars \u65e5\u672c\\";
+    inputs.project = path_from_wide(L"C:\\Spiele\\EAWR caf\u00e9\\project");
+    inputs.game_root = path_from_wide(L"D:\\Games\\Star Wars \u65e5\u672c\\");
     inputs.report = L"C:\\x\\report.json";
     auto args = godot_arguments(inputs);
-    const std::vector<std::wstring> expected = {L"--path", inputs.project.wstring(), L"--", L"--eawr-game-root", inputs.game_root.wstring(),
-                                                L"--eawr-front-end", L"--eawr-report", inputs.report.wstring()};
+    const std::vector<std::wstring> expected = {L"--path", path_to_wide(inputs.project), L"--", L"--eawr-game-root", path_to_wide(inputs.game_root),
+                                                L"--eawr-front-end", L"--eawr-report", path_to_wide(inputs.report)};
     CHECK(args == expected);
     inputs.safe_render_thread = true;   // the opt-out puts the engine flag right after --path
     args = godot_arguments(inputs);
@@ -402,6 +420,7 @@ void test_launch_plan() {
     CHECK(std::find(args.begin(), args.end(), std::wstring(L"--eawr-font-cache")) == args.end());   // the viewer extracts fonts itself
     CHECK(args[args.size() - 2] == L"--eawr-audio" && args.back() == L"off");
 
+#ifdef _WIN32
     // The command line parses back to exactly the same arguments.
     const std::wstring program = L"C:\\Program Files\\EAWR caf\u00e9\\godot\\Godot_v4.7.2-stable_win64.exe";
     const std::vector<std::wstring> tricky = {L"plain", L"with space", L"", L"quote\"inside", L"trailing\\", L"trailing space \\",
@@ -414,6 +433,7 @@ void test_launch_plan() {
     }
     const auto full = parse_back(quote_command_line(program, godot_arguments(inputs)));
     CHECK(full.size() == godot_arguments(inputs).size() + 1);
+#endif
 }
 
 // --- the flow -----------------------------------------------------------------------------------
@@ -467,10 +487,10 @@ public:
 // A package folder (Godot stand-in + project), user data and a fixture game.
 struct FlowFixture {
     Scratch scratch;
-    fs::path package = scratch.path() / L"EAWR caf\u00e9";
+    fs::path package = scratch.path() / path_from_wide(L"EAWR caf\u00e9");
     fs::path user_data = scratch.path() / "user data";
     fs::path viewer_data = scratch.path() / "Godot user data";
-    fs::path game = make_install(scratch.path() / "Games" / L"Star Wars \u65e5\u672c");
+    fs::path game = make_install(scratch.path() / "Games" / path_from_wide(L"Star Wars \u65e5\u672c"));
     FakeRegistry registry;
     FakeUi ui;
     FakeRunner runner;
@@ -501,7 +521,7 @@ void test_flow_explicit_game_root() {
     CHECK(f.runner.exe == f.package / "godot" / kGodotExecutableName);
     CHECK(f.runner.cwd == f.package);
     const auto& args = f.runner.args;
-    CHECK(args.size() == 8 && args[0] == L"--path" && args[1] == (f.package / "project").wstring() && args[2] == L"--");
+    CHECK(args.size() == 8 && args[0] == L"--path" && args[1] == path_to_wide(f.package / "project") && args[2] == L"--");
     CHECK(args[3] == L"--eawr-game-root" && same_location(fs::path(args[4]), f.game));
     CHECK(args[5] == L"--eawr-front-end" && args[6] == L"--eawr-report");
     CHECK(fs::path(args[7]).parent_path() == f.user_data / "launcher");
@@ -538,12 +558,12 @@ void test_render_thread_precedence() {
     CHECK(mode() == L"project");
     const auto alternate = f.scratch.path() / L"custom settings.cfg";
     write_file(alternate, "eawr-settings 1\nvideo.render_thread=1\n");
-    options.extra = {L"--eawr-settings-file", alternate.wstring()};
+    options.extra = {L"--eawr-settings-file", path_to_wide(alternate)};
     CHECK(mode() == L"safe");
     CHECK(fs::current_path() != f.package);
     const fs::path relative = L"relative settings.cfg";
     write_file(f.package / relative, "eawr-settings 1\nvideo.render_thread=1\n");
-    options.extra = {L"--eawr-settings-file", relative.wstring()};
+    options.extra = {L"--eawr-settings-file", path_to_wide(relative)};
     CHECK(mode() == L"safe"); // same working directory as the Godot child
     write_file(f.viewer_data / "eawr-settings.cfg", "eawr-settings 1\nvideo.render_thread=0\n");
     options.extra.insert(options.extra.end(), {L"--eawr-settings-file", L""});
@@ -563,13 +583,13 @@ void test_flow_mods() {
     CHECK(f.run(options) == kExitError);
     CHECK(f.runner.calls == 0);
     write_file(f.package / "launcher" / "project.godot", "config_version=5\n");
-    write_file(f.package / "eawr_mods_service.exe", "service stand-in");
+    write_file(f.package / kModsServiceExecutableName, "service stand-in");
     CHECK(f.run(options) == kExitOk);
-    const std::vector<std::wstring> expected = {L"--path", (f.package / "launcher").wstring(), L"--",
-        L"--eawr-mods-service", (f.package / "eawr_mods_service.exe").wstring(), L"--eawr-godot",
-        (f.package / "godot" / kGodotExecutableName).wstring(), L"--eawr-game-project",
-        (f.package / "project").wstring(), L"--eawr-game-root", f.game.wstring(),
-        L"--eawr-launch-loop", (f.user_data / "launcher" / "next-action.json").wstring()};
+    const std::vector<std::wstring> expected = {L"--path", path_to_wide(f.package / "launcher"), L"--",
+        L"--eawr-mods-service", path_to_wide(f.package / kModsServiceExecutableName), L"--eawr-godot",
+        path_to_wide(f.package / "godot" / kGodotExecutableName), L"--eawr-game-project",
+        path_to_wide(f.package / "project"), L"--eawr-game-root", path_to_wide(f.game),
+        L"--eawr-launch-loop", path_to_wide(f.user_data / "launcher" / "next-action.json")};
     CHECK(f.runner.args == expected);
     CHECK(f.runner.cwd == f.package);
     CHECK_CONTAINS(f.log_text(), "the mod manager exited with code");
@@ -585,7 +605,7 @@ void test_flow_launch_loop() {
     options.game_root = f.game;
     options.mods = true;
     write_file(f.package / "launcher/project.godot", "manager");
-    write_file(f.package / "eawr_mods_service.exe", "service");
+    write_file(f.package / kModsServiceExecutableName, "service");
     const auto request = f.user_data / "launcher/next-action.json";
     const auto profile = f.user_data / "mods" / "profiles" / "sample.json";
     const auto profile_json = [](const std::string& render) {
@@ -607,7 +627,7 @@ void test_flow_launch_loop() {
             write_file(request, R"({"action":"launch-profile","profile":"sample"})");
         } else if (f.runner.calls == 2 || f.runner.calls == 4 || f.runner.calls == 5) {
             auto flag = std::find(args.begin(), args.end(), L"--eawr-mod-profile");
-            CHECK(flag != args.end() && flag + 1 != args.end() && *(flag + 1) == profile.wstring());
+            CHECK(flag != args.end() && flag + 1 != args.end() && *(flag + 1) == path_to_wide(profile));
             auto render = std::find(args.begin(), args.end(), L"--render-thread");
             const std::wstring expected = f.runner.calls == 2 ? L"safe" : L"separate";
             CHECK(render != args.end() && render + 1 != args.end() && *(render + 1) == expected);
@@ -617,7 +637,7 @@ void test_flow_launch_loop() {
             if (f.runner.calls == 2) write_file(request, R"({"action":"open-manager"})");
             if (f.runner.calls == 4) write_file(request, R"({"action":"launch-profile","profile":"sample"})");
         } else if (f.runner.calls == 3) {
-            CHECK(args[1] == (f.package / "launcher").wstring());
+            CHECK(args[1] == path_to_wide(f.package / "launcher"));
             write_file(profile, profile_json("separate"));
             write_file(request, R"({"action":"launch-profile","profile":"sample"})");
         } else {
@@ -654,7 +674,7 @@ void test_flow_launch_loop_invalid() {
         options.game_root = f.game;
         options.mods = true;
         write_file(f.package / "launcher/project.godot", "manager");
-        write_file(f.package / "eawr_mods_service.exe", "service");
+        write_file(f.package / kModsServiceExecutableName, "service");
         const auto request = f.user_data / "launcher/next-action.json";
         f.runner.on_run = [&] { if (!text.empty()) write_file(request, text); };
         CHECK(f.run(options) == kExitOk);
@@ -685,7 +705,7 @@ void test_flow_launch_loop_profile_traversal() {
         options.game_root = f.game;
         options.mods = true;
         write_file(f.package / "launcher/project.godot", "manager");
-        write_file(f.package / "eawr_mods_service.exe", "service");
+        write_file(f.package / kModsServiceExecutableName, "service");
         const auto request = f.user_data / "launcher" / "next-action.json";
         const std::string id = absolute ? path_to_utf8(f.scratch.path() / "absolute") : "../escape";
         const auto target = absolute ? f.scratch.path() / "absolute.json" : f.user_data / "mods" / "escape.json";
@@ -719,7 +739,7 @@ void test_flow_launch_loop_explicit_safe_render_thread() {
         options.safe_render_thread = safe ? parse_command_line({L"--safe-render-thread"}).safe_render_thread
                                           : parse_command_line({L"--render-thread", L"separate"}).safe_render_thread;
         write_file(f.package / "launcher/project.godot", "manager");
-        write_file(f.package / "eawr_mods_service.exe", "service");
+        write_file(f.package / kModsServiceExecutableName, "service");
         write_file(f.viewer_data / "eawr-settings.cfg", safe ? "eawr-settings 1\nvideo.render_thread=0\n"
                                                            : "eawr-settings 1\nvideo.render_thread=1\n");
         write_file(f.user_data / "mods/profiles/sample.json",
@@ -748,7 +768,7 @@ void test_flow_launch_loop_profile_beats_saved_render_thread() {
         options.game_root = f.game;
         options.mods = true;
         write_file(f.package / "launcher/project.godot", "manager");
-        write_file(f.package / "eawr_mods_service.exe", "service");
+        write_file(f.package / kModsServiceExecutableName, "service");
         write_file(f.viewer_data / "eawr-settings.cfg", profile_safe ? "eawr-settings 1\nvideo.render_thread=0\n"
                                                                    : "eawr-settings 1\nvideo.render_thread=1\n");
         write_file(f.user_data / "mods/profiles/sample.json",
@@ -776,7 +796,7 @@ void test_flow_launch_loop_guard_and_failure() {
     options.game_root = f.game;
     options.mods = true;
     write_file(f.package / "launcher/project.godot", "manager");
-    write_file(f.package / "eawr_mods_service.exe", "service");
+    write_file(f.package / kModsServiceExecutableName, "service");
     const auto request = f.user_data / "launcher/next-action.json";
     f.runner.on_run = [&] {
         CHECK(!fs::exists(request));
@@ -801,7 +821,7 @@ void test_flow_launch_loop_long_sessions_and_unclearable_request() {
     auto options = f.options();
     options.game_root = f.game;
     write_file(f.package / "launcher/project.godot", "manager");
-    write_file(f.package / "eawr_mods_service.exe", "service");
+    write_file(f.package / kModsServiceExecutableName, "service");
     const auto request = f.user_data / "launcher/next-action.json";
     write_file(f.user_data / "mods/profiles/sample.json",
         R"({"format":"eawr-mod-profile","version":1,"id":"sample","launch":{"render_thread":"safe"}})");
@@ -1064,8 +1084,10 @@ void test_find_godot() {
     CHECK(!find_godot(dir));
     write_file(dir / "Godot_v4.7.2-stable_win64_console.exe", "console runtime");
     CHECK(!find_godot(dir));   // never the console runtime
+#ifdef _WIN32
     write_file(dir / "Godot_v4.7.2-stable_mono_win64.exe", "other flavour");
     CHECK(find_godot(dir) == dir / "Godot_v4.7.2-stable_mono_win64.exe");
+#endif
     write_file(dir / "godot" / kGodotExecutableName, "bundled");
     CHECK(find_godot(dir) == dir / "godot" / kGodotExecutableName);
 }
@@ -1080,6 +1102,159 @@ void test_project_name_matches_godot_project(const fs::path& project_godot) {
 } // namespace
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    if (argc > 1 && std::string(argv[1]) == "--path") {
+        fs::path output;
+        for (int i = 2; i + 1 < argc; ++i) {
+            const std::string argument = argv[i];
+            if (argument == "--eawr-test-output") output = argv[i + 1];
+            if (argument == "--eawr-report") write_file(argv[i + 1], "{\"status\":\"ok\"}");
+            if (argument == "--eawr-launch-loop") {
+                const fs::path request = argv[i + 1];
+                output = request.parent_path() / "manager-args";
+                write_file(request, "{\"action\":\"launch-profile\",\"profile\":\"smoke\"}");
+            }
+        }
+        if (output.empty()) return 0;
+        std::ofstream out(output, std::ios::binary);
+        out << path_to_utf8(fs::current_path()) << '\0';
+        for (int j = 1; j < argc; ++j) out << argv[j] << '\0';
+        return out ? 0 : 24;
+    }
+    if (argc == 4 && std::string(argv[1]) == "--linux-launcher-smoke") {
+        Scratch scratch;
+        const fs::path kit = scratch.path() / "relocated kit";
+        fs::create_directories(kit / "godot");
+        fs::copy_file(fs::absolute(argv[2]), kit / "eawr-launcher");
+        fs::copy_file(fs::absolute(argv[3]), kit / "eawr-mods");
+        fs::copy_file(fs::read_symlink("/proc/self/exe"), kit / "godot" / kGodotExecutableName);
+        write_file(kit / "project/project.godot", "fixture project");
+        const fs::path game = make_install(scratch.path() / "game");
+        const fs::path output = scratch.path() / "args";
+        const fs::path data = scratch.path() / "data";
+        auto runner = make_linux_process_runner();
+        std::vector<std::wstring> args{L"--no-dialogs", L"--game-root", path_to_wide(game), L"--user-data", path_to_wide(data),
+                                       L"--safe-render-thread", L"--", L"--eawr-test-output", path_to_wide(output)};
+        const auto play = runner->run(kit / "eawr-launcher", args, scratch.path());
+        CHECK(play.started && play.exit_code == 0);
+        const auto captured = read_file(output);
+        CHECK_CONTAINS(captured, path_to_utf8(kit / "project"));
+        CHECK_CONTAINS(captured, path_to_utf8(game));
+        CHECK_CONTAINS(captured, std::string("--render-thread\0safe\0", 21));
+        const auto mods = runner->run(kit / "eawr-mods", args, scratch.path());
+        CHECK(mods.started && mods.exit_code == kExitError);
+        CHECK_CONTAINS(read_file(data / "launcher/launcher.log"), "Ordinary Play works without it");
+        write_file(kit / "launcher/project.godot", "fixture manager");
+        write_file(kit / kModsServiceExecutableName, "fixture service");
+        const auto installed = runner->run(kit / "eawr-mods", args, scratch.path());
+        CHECK(installed.started && installed.exit_code == 0);
+        CHECK_CONTAINS(read_file(data / "launcher/launcher.log"), "the mod manager exited with code 0");
+
+        const fs::path caller = scratch.path() / "external caller";
+        const fs::path project = caller / "viewer";
+        const fs::path state = caller / "state";
+        const fs::path report = state / "launcher/front-end-report.json";
+        const fs::path loop = state / "launcher/next-action.json";
+        write_file(project / "project.godot", "external fixture project");
+        write_file(state / "mods/profiles/smoke.json",
+                   "{\"format\":\"eawr-mod-profile\",\"version\":1,\"id\":\"smoke\",\"launch\":{\"render_thread\":\"safe\"}}");
+        args = {L"--no-dialogs", L"--game-root", path_to_wide(game), L"--project", L"./viewer",
+                L"--user-data", L"./state", L"--safe-render-thread", L"--", L"--eawr-test-output", path_to_wide(output)};
+        for (const auto* entry : {"eawr-launcher", "eawr-mods"}) {
+            fs::remove(output);
+            fs::remove(report);
+            const auto relative = runner->run(kit / entry, args, caller);
+            CHECK(relative.started && relative.exit_code == 0);
+            const auto viewer_args = read_file(output);
+            CHECK_CONTAINS(viewer_args, path_to_utf8(kit) + '\0');
+            CHECK_CONTAINS(viewer_args, std::string("--path\0", 7) + path_to_utf8(project) + '\0');
+            CHECK_CONTAINS(viewer_args, std::string("--eawr-report\0", 14) + path_to_utf8(report) + '\0');
+            CHECK(read_file(report) == "{\"status\":\"ok\"}");
+            CHECK(fs::is_regular_file(state / "launcher/launcher.log"));
+            CHECK(!fs::exists(loop));
+            CHECK(!fs::exists(kit / "state"));
+        }
+        const auto manager_args = read_file(state / "launcher/manager-args");
+        CHECK_CONTAINS(manager_args, path_to_utf8(kit) + '\0');
+        CHECK_CONTAINS(manager_args, std::string("--eawr-game-project\0", 20) + path_to_utf8(project) + '\0');
+        CHECK_CONTAINS(manager_args, std::string("--eawr-launch-loop\0", 19) + path_to_utf8(loop) + '\0');
+        CHECK_CONTAINS(read_file(output), std::string("--eawr-mod-profile\0", 19)
+                       + path_to_utf8(state / "mods/profiles/smoke.json") + '\0');
+        return g_failures == 0 ? 0 : 1;
+    }
+    if (argc >= 3 && std::string(argv[1]) == "--linux-process-probe") {
+        std::ofstream out(argv[2], std::ios::binary);
+        out << path_to_utf8(fs::current_path()) << '\0';
+        for (int i = 3; i < argc; ++i) out << argv[i] << '\0';
+        return out ? 23 : 24;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--linux-process-signal") {
+        std::raise(SIGTERM);
+        return 1;
+    }
+    Scratch environment;
+    setenv("HOME", environment.path().c_str(), 1);
+    setenv("XDG_DATA_HOME", (environment.path() / "xdg").c_str(), 1);
+    {
+        const std::wstring unicode = L"/caf\u00e9/\u65e5\u672c/\U0001f680";
+        CHECK(path_to_wide(path_from_wide(unicode)) == unicode);
+        CHECK(parse_command_line({L"--game-root", unicode}).game_root == path_from_wide(unicode));
+        bool rejected = false;
+        try { (void)path_to_wide(fs::path(std::string(1, '\xff'))); }
+        catch (const std::exception&) { rejected = true; }
+        CHECK(rejected);
+        rejected = false;
+        try { (void)path_from_wide(std::wstring(1, static_cast<wchar_t>(0xd800))); }
+        catch (const std::exception&) { rejected = true; }
+        CHECK(rejected);
+
+        auto registry = make_linux_registry();
+        const fs::path native = environment.path() / ".local/share/Steam";
+        const fs::path flatpak = environment.path() / ".var/app/com.valvesoftware.Steam/.local/share/Steam";
+        const fs::path additional = environment.path() / "extra library";
+        const fs::path a = make_install(native / "steamapps/common/Native");
+        const fs::path b = make_install(flatpak / "steamapps/common/Flatpak");
+        const fs::path c = make_install(additional / "steamapps/common/Additional");
+        const fs::path d = make_install(environment.path() / "xdg/Steam/steamapps/common/XDG");
+        write_file(native / "steamapps/libraryfolders.vdf", "\"libraryfolders\" { \"1\" { \"path\" \"" + vdf_escaped(additional) + "\" } }");
+        fs::create_directories(environment.path() / ".steam");
+        fs::create_directory_symlink(native, environment.path() / ".steam/steam");
+        fs::create_directories(environment.path() / ".var/app/com.valvesoftware.Steam/data");
+        fs::create_directory_symlink(flatpak, environment.path() / ".var/app/com.valvesoftware.Steam/data/Steam");
+        const auto found = discover_installs(*registry);
+        const auto native_found = discover_installs();
+        CHECK(found.size() == 4);
+        CHECK(native_found.size() == found.size());
+        for (const auto& root : {a, b, c, d}) CHECK(std::any_of(found.begin(), found.end(), [&](const Install& i) { return same_location(i.root, root); }));
+        for (const auto& install : found) CHECK(std::any_of(native_found.begin(), native_found.end(), [&](const Install& i) { return same_location(i.root, install.root); }));
+        CHECK(std::string(kModsServiceExecutableName) == "eawr_mods_service");
+        fs::remove_all(native);
+        fs::remove_all(flatpak);
+        fs::remove_all(additional);
+        fs::remove_all(environment.path() / "xdg/Steam");
+
+        auto runner = make_linux_process_runner();
+        const fs::path result = environment.path() / "process output";
+        const fs::path self = fs::read_symlink("/proc/self/exe");
+        const std::vector<std::wstring> tricky{L"", L"two words", L"quote\"'", L"trailing\\", L"$(touch injected);*", unicode};
+        std::vector<std::wstring> args{L"--linux-process-probe", path_to_wide(result)};
+        args.insert(args.end(), tricky.begin(), tricky.end());
+        const auto child = runner->run(self, args, environment.path());
+        CHECK(child.started && child.exit_code == 23);
+        std::string expected = path_to_utf8(environment.path()) + '\0';
+        for (const auto& arg : tricky) expected += path_to_utf8(path_from_wide(arg)) + '\0';
+        CHECK(read_file(result) == expected);
+        CHECK(!fs::exists(environment.path() / "injected"));
+        CHECK(!runner->run(environment.path() / "absent", {}, environment.path()).started);
+        CHECK(!runner->run(self, {}, environment.path() / "absent").started);
+        const fs::path denied = environment.path() / "not executable";
+        write_file(denied, "not executable");
+        CHECK(!runner->run(denied, {}, environment.path()).started);
+        CHECK(!runner->run(self, {std::wstring(1, L'\0')}, environment.path()).started);
+        const auto signalled = runner->run(self, {L"--linux-process-signal"}, environment.path());
+        CHECK(signalled.started && signalled.exit_code == 128 + SIGTERM);
+    }
+#endif
     CHECK(mods_start_mode({}) == ModsStartMode::launch);
     const std::array<std::wstring_view, 1> shortcut{L"--create-shortcut"};
     const std::array<std::wstring_view, 1> bad{L"--mods"};
@@ -1087,8 +1262,12 @@ int main(int argc, char** argv) {
     CHECK(mods_start_mode(shortcut) == ModsStartMode::create_shortcut);
     CHECK(mods_start_mode(bad) == ModsStartMode::invalid);
     CHECK(mods_start_mode(extra) == ModsStartMode::invalid);
+#ifdef _WIN32
     CHECK(mods_launcher_path(L"X:/portable kit/EAWR Mods.exe") == fs::path(L"X:/portable kit/EAWR.exe"));
     CHECK(mods_launcher_path(L"Y:/moved kit/EAWR Mods.exe") == fs::path(L"Y:/moved kit/EAWR.exe"));
+#else
+    CHECK(mods_launcher_path("/portable kit/eawr-mods") == fs::path("/portable kit/eawr-launcher"));
+#endif
 
     test_validation();
     test_steam_modern_and_legacy();

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <system_error>
 
 namespace eawr::launcher {
@@ -50,7 +51,7 @@ std::optional<fs::path> directory_of_command(const std::string& command) {
 void add_candidate(std::vector<Candidate>& list, fs::path path, const std::string& source, bool nested_ok) {
     if (path.empty()) return;
     for (const Candidate& existing : list) {
-        if (lower_ascii(path_to_utf8(existing.path.lexically_normal())) == lower_ascii(path_to_utf8(path.lexically_normal()))) return;
+        if (same_location(existing.path, path)) return;
     }
     list.push_back({std::move(path), source, nested_ok});
 }
@@ -109,6 +110,19 @@ RootCheck check_root(const fs::path& root) {
 
 std::vector<fs::path> steam_library_roots(const RegistryReader& registry) {
     std::vector<fs::path> steam;
+#ifndef _WIN32
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        const fs::path base = path_from_utf8(home);
+        for (const auto& suffix : {".steam/steam", ".steam/root", ".local/share/Steam",
+                                  ".var/app/com.valvesoftware.Steam/.local/share/Steam",
+                                  ".var/app/com.valvesoftware.Steam/data/Steam"}) {
+            if (directory_exists(base / suffix)) mods::steam::add_library(steam, base / suffix);
+        }
+    }
+    if (const char* data = std::getenv("XDG_DATA_HOME"); data && *data && path_from_utf8(data).is_absolute()
+        && directory_exists(path_from_utf8(data) / "Steam"))
+        mods::steam::add_library(steam, path_from_utf8(data) / "Steam");
+#endif
     if (const auto path = registry.read_string(RegistryHive::current_user, RegistryView::view64, "Software\\Valve\\Steam", "SteamPath")) {
         mods::steam::add_library(steam, path_from_utf8(*path));
     }
@@ -247,5 +261,15 @@ std::vector<Install> discover_installs(const RegistryReader& registry) {
     }
     return installs;
 }
+
+#ifndef _WIN32
+std::vector<Install> discover_installs() {
+    class NoRegistry final : public RegistryReader {
+        std::optional<std::string> read_string(RegistryHive, RegistryView, const std::string&, const std::string&) const override { return {}; }
+        std::vector<std::string> subkeys(RegistryHive, RegistryView, const std::string&) const override { return {}; }
+    };
+    return discover_installs(NoRegistry{});
+}
+#endif
 
 } // namespace eawr::launcher

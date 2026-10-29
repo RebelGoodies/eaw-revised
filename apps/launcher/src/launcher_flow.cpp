@@ -197,13 +197,13 @@ Options parse_command_line(const std::vector<std::wstring>& args) {
             break;
         }
         if (argument == L"--game-root") {
-            if (const std::wstring* text = value("--game-root")) options.game_root = fs::path(*text);
+            if (const std::wstring* text = value("--game-root")) options.game_root = path_from_wide(*text);
         } else if (argument == L"--godot") {
-            if (const std::wstring* text = value("--godot")) options.godot = fs::path(*text);
+            if (const std::wstring* text = value("--godot")) options.godot = path_from_wide(*text);
         } else if (argument == L"--project") {
-            if (const std::wstring* text = value("--project")) options.project = fs::path(*text);
+            if (const std::wstring* text = value("--project")) options.project = path_from_wide(*text);
         } else if (argument == L"--user-data") {
-            if (const std::wstring* text = value("--user-data")) options.user_data = fs::path(*text);
+            if (const std::wstring* text = value("--user-data")) options.user_data = path_from_wide(*text);
         } else if (argument == L"--godot-quit-after") {
             if (const std::wstring* text = value("--godot-quit-after")) {
                 try {
@@ -247,6 +247,7 @@ std::optional<fs::path> find_godot(const fs::path& launcher_dir) {
         if (folder.empty()) continue;
         if (is_file(folder / name)) return folder / name;
     }
+#ifdef _WIN32
     for (const fs::path& folder : {launcher_dir / "godot", launcher_dir}) {
         std::error_code error;
         std::vector<fs::path> found;
@@ -261,6 +262,7 @@ std::optional<fs::path> find_godot(const fs::path& launcher_dir) {
         std::sort(found.begin(), found.end());
         if (!found.empty()) return found.front();
     }
+#endif
     return std::nullopt;
 }
 
@@ -282,7 +284,7 @@ int run_launcher(const Options& options, const RegistryReader& registry, Ui& ui,
     log.line("launcher started; user data " + path_to_utf8(options.user_data));
     if (!options.error.empty()) return context.fail(options.error);
     if (options.user_data.empty()) {
-        return context.fail("EAWR could not find the user data folder (%APPDATA%). Pass --user-data <folder>.");
+        return context.fail("EAWR could not find the user data folder. Pass --user-data <folder>.");
     }
     std::error_code error;
     fs::create_directories(options.user_data / "launcher", error);
@@ -331,7 +333,7 @@ int run_launcher(const Options& options, const RegistryReader& registry, Ui& ui,
         fs::path settings_file = default_settings;
         for (std::size_t i = 0; i + 1 < options.extra.size(); ++i)
             if (options.extra[i] == L"--eawr-settings-file") {
-                const fs::path forwarded = options.extra[++i];
+                const fs::path forwarded = path_from_wide(options.extra[++i]);
                 settings_file = forwarded.empty() ? default_settings : forwarded;
             }
         // Godot starts in the launcher folder; relative overrides must name the
@@ -350,8 +352,8 @@ int run_launcher(const Options& options, const RegistryReader& registry, Ui& ui,
     unsigned rapid_restarts = 0;
     for (;;) {
         if (manager && (!is_file(options.launcher_dir / "launcher" / "project.godot")
-                       || !is_file(options.launcher_dir / "eawr_mods_service.exe"))) {
-            return context.fail("EAWR Mods is missing or incomplete. Extract the whole EAWR download and try again.");
+                       || !is_file(options.launcher_dir / kModsServiceExecutableName))) {
+            return context.fail("The optional EAWR Mods manager is not installed or is incomplete. Install the manager package to use Mods. Ordinary Play works without it.");
         }
         error.clear();
         fs::remove(next_action, error);
@@ -376,7 +378,7 @@ int run_launcher(const Options& options, const RegistryReader& registry, Ui& ui,
         if (!child.started) {
             if (manager) return context.fail("EAWR could not start the mod manager: " + child.error);
             return context.fail("EAWR could not start the Godot runtime " + path_to_utf8(godot) + ": " + child.error
-                                + ". Security software or Windows application control may have blocked it.", godot_log);
+                                + ". Check that the runtime is executable and its system libraries are installed.", godot_log);
         }
         // Consume before interpreting the exit status, including requests left by a failed child.
         const auto action = read_loop_json(next_action);

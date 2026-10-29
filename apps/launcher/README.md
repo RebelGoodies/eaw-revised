@@ -1,11 +1,13 @@
-# EAWR.exe: the first-run launcher (Windows)
+# EAWR native first-run launcher
+
+## Windows launcher
 
 `EAWR.exe` (target `eawr_launcher`) is the file a player double-clicks. It is a small native GUI program:
 no console window, no Python, the C++ runtime linked statically and only system DLLs imported, so a clean PC
 needs no redistributable. It never elevates (`asInvoker`), never changes firewall rules and never writes into
 the game folder.
 
-## Package layout it expects
+### Package layout it expects
 
 ```text
 EAWR.exe
@@ -17,7 +19,7 @@ project\project.godot ...               the viewer project with its extension
 `godot\...exe` it also looks beside itself and one folder up, and takes any `Godot_v4.7.2-stable*.exe` whose
 name does not contain `console`. The packaging side (`tools/release/package_release.py`) puts the files there.
 
-## What it does
+### What it does
 
 1. **Finds Forces of Corruption**, in this order: `--game-root` / `EAWR_EAW_GAME_ROOT` (an explicit folder is
    never replaced by a search and never overwrites the saved choice), the choice saved by an earlier run (revalidated every run), then Steam (HKCU
@@ -42,6 +44,48 @@ name does not contain `console`. The packaging side (`tools/release/package_rele
 
 Exit codes: 0 played, 2 error, 3 cancelled in the picker, anything else is Godot's own code.
 
+## Linux launcher
+
+The Linux launcher uses GTK 3.24 or newer for the installation chooser, folder picker and error dialogs.
+It starts the bundled runtime with `execv` arguments and waits for it to exit, without a shell or runtime Python.
+Paths in the release layout are relative to the launcher executable, including when an AppImage mounts it elsewhere.
+
+### Package layout it expects
+
+```text
+eawr-launcher                              target eawr_launcher, ordinary Play
+eawr-mods                                  target eawr_mods_start, optional manager entry point
+godot/Godot_v4.7.2-stable_linux.x86_64       executable Godot runtime
+project/project.godot                       viewer project and Linux extension
+launcher/project.godot                      optional manager project
+eawr_mods_service                           optional manager service, exact root-level lookup
+```
+
+As on Windows, `eawr-launcher` starts the viewer and `eawr-mods` starts the manager (`eawr-launcher --mods`).
+The manager project receives the absolute service path through `--eawr-mods-service`.
+The manager project and service are optional, so ordinary Play works without them.
+Choosing Mods without the manager package shows an explanation and leaves Play available.
+
+### What it does
+
+1. **Finds Forces of Corruption**: checks `~/.steam/steam`, `~/.steam/root`, `~/.local/share/Steam`,
+   `$XDG_DATA_HOME/Steam` and the Flatpak `.local/share/Steam` and `data/Steam` locations under
+   `~/.var/app/com.valvesoftware.Steam`. Shared Steam utilities expand `libraryfolders.vdf`, read app
+   manifests and scan library folders. One valid installation is used automatically. Several or no
+   installations, or `--choose-game`, open the chooser with manual folder selection. Without a display,
+   errors go to stderr and a choice-requiring discovery exits with cancellation and a `--game-root` hint.
+2. **Starts the viewer**: passes `--render-thread safe` or `--render-thread separate` through to override
+   the saved Performance setting. `--safe-render-thread` remains the Safe alias. Settings, launcher state
+   and font provisioning use the existing Godot XDG layout under
+   `$XDG_DATA_HOME/godot/app_userdata/EAWR Viewer`, falling back to
+   `~/.local/share/godot/app_userdata/EAWR Viewer`. The viewer provisions fonts itself. `--user-data`
+   overrides launcher state and logs, while viewer settings retain their existing location.
+3. **Explains failures**: uses GTK dialogs for errors and folder selection. In headless use, errors go to
+   stderr. The launcher waits for the runtime to exit.
+
+The portable `discover_installs(const RegistryReader&)` interface has no GTK dependency.
+Linux service callers can use `discover_installs()` without a registry reader or launcher platform objects.
+
 ## Files
 
 Godot's user-data folder for the viewer, `%APPDATA%\Godot\app_userdata\EAWR Viewer` (the folder the viewer's
@@ -61,7 +105,8 @@ The viewer's own `logs\godot.log` is named in the error dialogs.
 `launcher_flow` holds the steps behind `Ui`, `RegistryReader` and `ProcessRunner` interfaces, so the tests run
 them with fakes; `install_discovery` (VDF/registry search and validation), `launch_plan` (command line and
 quoting) and `launcher_state` (saved choice) are portable standard C++; `win_*.cpp` are the registry, process,
-dialog and entry-point layers. The JSON and KeyValues parsers, the UTF-8 and case-insensitive path helpers and the
+dialog and entry-point layers. Linux uses GTK for its dialogs and entry points. The JSON and KeyValues parsers,
+the UTF-8 and case-insensitive path helpers and the
 `libraryfolders.vdf` reader live in `src/mods/steam` (shared with the mod core); the launcher compiles those
 sources itself with its static C runtime instead of linking `eawr_mods`, and `src/text_formats.hpp` and
 `src/paths.hpp` keep the launcher's names for them.
@@ -75,6 +120,9 @@ sources itself with its static C runtime instead of linking `eawr_mods`, and `sr
   window): front-end arguments, hidden start, saved choice, readable errors; and checks on the exe itself (GUI
   subsystem, imports system DLLs only, `asInvoker` manifest).
 - `launcher_ui_smoke`: the real dialogs, clicked on a private desktop (`tools/rig/private_desktop.py`).
+- Linux builds also run `launcher_core_contracts` with UTF-8 argument, process failure and native/Flatpak
+  discovery fixtures. `launcher_linux_smoke` relocates a fixture kit and exercises both native entry points
+  against a fake runtime. Win32-only smoke helpers remain Windows-only.
 
 Fixtures are empty folders and made-up bytes; no retail data.
 
