@@ -202,21 +202,23 @@ class FilesPageContracts(unittest.TestCase):
         baseline = self.real_helper(profile)
         self.assertEqual(baseline["stage"], "catalog", baseline)
         index = self.user / "failed.files"
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p,
-                                      ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
-        kernel.CreateFileW.restype = ctypes.c_void_p
-        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-        # Enumeration succeeds, but the optional conflicting art candidate cannot be read.
-        handle = kernel.CreateFileW(str(art), 0x80000000, 0, None, 3, 0, None)
-        self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
-        try:
-            unreadable = self.real_helper(profile, index)
-        finally:
-            kernel.CloseHandle(handle)
+        reports = []
+        if sys.platform == "win32":
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p,
+                                          ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+            kernel.CreateFileW.restype = ctypes.c_void_p
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            # Windows sharing denial has no POSIX equivalent (chmod also cannot deny root).
+            handle = kernel.CreateFileW(str(art), 0x80000000, 0, None, 3, 0, None)
+            self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
+            try:
+                reports.append(self.real_helper(profile, index))
+            finally:
+                kernel.CloseHandle(handle)
         # A missing output parent exercises the real writer's stream-failure path.
         unwritable = self.real_helper(profile, self.user / "missing/cache.files")
-        for report in (unreadable, unwritable):
+        for report in [*reports, unwritable]:
             self.assertEqual(report["stage"], baseline["stage"])
             self.assertEqual(report["ok"], baseline["ok"])
             self.assertEqual(report["error_count"], baseline["error_count"])

@@ -2,6 +2,7 @@
 import ctypes
 from ctypes import wintypes
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -13,12 +14,70 @@ import mods_service_contract as contract
 SERVICE, FAKE, HELPER = map(Path, sys.argv[1:4])
 UPDATE = "--update-transcripts" in sys.argv
 contract.SERVICE = SERVICE
-ctypes.windll.kernel32.OpenProcess.restype = wintypes.HANDLE
-ctypes.windll.kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-ctypes.windll.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+if sys.platform == "win32":
+    ctypes.windll.kernel32.OpenProcess.restype = wintypes.HANDLE
+    ctypes.windll.kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    ctypes.windll.kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def process_running(pid):
+    if sys.platform == "win32":
+        process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not process:
+            return False
+        try:
+            code = wintypes.DWORD()
+            ctypes.windll.kernel32.GetExitCodeProcess(process, ctypes.byref(code))
+            return code.value == 259
+        finally:
+            ctypes.windll.kernel32.CloseHandle(process)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
 
 
 class LoadCheckContracts(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux helper argv and EOF lifecycle")
+    def test_linux_utf8_helper_path_exec_failure_partial_eof_and_default_helper(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "paths with spaces \u00e9 \u661f"
+            game, user = root / "game", root / "user"
+            for name in ("corruption/Data", "GameData/Data"):
+                (game / name).mkdir(parents=True)
+                (game / name / "marker").write_text("synthetic")
+            (game / "corruption/StarWarsG.exe").write_bytes(b"")
+            helper_link = root / "helper \u00e9 \u661f"
+            helper_link.symlink_to(FAKE.resolve())
+            for mode, helper in (("clean", helper_link), ("unterminated", helper_link),
+                                 ("missing", root / "missing-helper"), ("real", None)):
+                with self.subTest(mode=mode):
+                    args = ["--user-data", str(user)]
+                    if helper is not None:
+                        args += ["--loadcheck-helper", str(helper)]
+                    client = contract.Interactive(args=args)
+                    try:
+                        for message in (contract.hello(), contract.request(2, "game.find", hint=str(game)),
+                                        contract.request(3, "profile.save", profile={"id":mode, "name":mode, "layers":[]})):
+                            client.send(message)
+                            self.assertIn("result", client.receive())
+                        client.send(contract.request(4, "loadcheck.start", profile=mode))
+                        answer = client.receive()
+                        while "event" in answer:
+                            answer = client.receive()
+                        if mode in ("unterminated", "missing"):
+                            self.assertEqual(answer["error"]["code"], "EAWR-MODS-SVC-0011")
+                        else:
+                            self.assertEqual(answer["result"]["report"]["ok"], mode == "clean")
+                        client.send(contract.request(5, "shutdown"))
+                        self.assertEqual(client.receive(), {"id":5, "result":{}})
+                        self.assertEqual(client.process.wait(timeout=10), 0)
+                        self.assertFalse(list((user / "mods/cache/loadcheck").glob("running-*")))
+                    finally:
+                        client.close()
+                        client.kill()
+
     def test_shutdown_and_eof_cancel(self):
         for close_stdin in (False, True):
             with self.subTest(eof=close_stdin), tempfile.TemporaryDirectory() as temporary:
@@ -46,6 +105,7 @@ class LoadCheckContracts(unittest.TestCase):
                     if not close_stdin:
                         self.assertEqual(client.receive(), {"id":5, "result":{}})
                     self.assertEqual(client.process.wait(timeout=10), 0)
+                    self.assertFalse(process_running(int((user / "helper.pid").read_text())))
                 finally:
                     client.close()
 
@@ -279,12 +339,7 @@ class LoadCheckContracts(unittest.TestCase):
                         self.assertEqual(by_id[cancel_id]["result"], {"cancelled": True})
                         self.assertEqual(by_id[start]["error"]["code"], "EAWR-MODS-SVC-0009")
                         pid = int((user / "helper.pid").read_text())
-                        process = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-                        if process:
-                            code = ctypes.c_ulong()
-                            ctypes.windll.kernel32.GetExitCodeProcess(process, ctypes.byref(code))
-                            ctypes.windll.kernel32.CloseHandle(process)
-                            self.assertNotEqual(code.value, 259, "cancel must kill the helper")
+                        self.assertFalse(process_running(pid), "cancel must kill and reap the helper")
                         self.assertEqual(call("loadcheck.cancel", request=start)["result"], {"cancelled": False})
                     elif mode in ("crash", "nonjson", "invalid", "oversize", "wrapped", "changed", "badseverity", "badtotals"):
                         if mode == "changed":

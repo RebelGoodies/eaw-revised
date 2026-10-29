@@ -22,15 +22,22 @@ set(EAWR_MODS_SERVICE_SOURCES
     "${EAWR_BUILD_IDENTITY_CPP}"
 )
 
-add_executable(eawr_mods_service WIN32 src/main.cpp ${EAWR_MODS_SERVICE_SOURCES})
+add_executable(eawr_mods_service src/main.cpp ${EAWR_MODS_SERVICE_SOURCES})
 target_include_directories(eawr_mods_service PRIVATE src "${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/apps/launcher/src")
 target_compile_definitions(eawr_mods_service PRIVATE EAWR_MODS_SERVICE_VERSION="${PROJECT_VERSION}")
 if(WIN32)
+    set_target_properties(eawr_mods_service PROPERTIES WIN32_EXECUTABLE TRUE)
     target_compile_definitions(eawr_mods_service PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_sources(eawr_mods_service PRIVATE "${PROJECT_SOURCE_DIR}/apps/launcher/src/win_registry.cpp")
     target_link_libraries(eawr_mods_service PRIVATE shell32 advapi32 ole32 uuid)
+else()
+    find_package(Threads REQUIRED)
+    target_sources(eawr_mods_service PRIVATE src/posix_process.cpp)
+    target_link_libraries(eawr_mods_service PRIVATE Threads::Threads)
 endif()
-set_target_properties(eawr_mods_service PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+if(MSVC)
+    set_target_properties(eawr_mods_service PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 target_compile_features(eawr_mods_service PRIVATE cxx_std_20)
 eawr_target_project_warnings(eawr_mods_service)

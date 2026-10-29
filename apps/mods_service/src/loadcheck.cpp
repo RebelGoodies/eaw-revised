@@ -14,7 +14,12 @@
 #include <algorithm>
 #include <charconv>
 #include <array>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "posix_process.hpp"
+#include <unistd.h>
+#endif
 
 namespace eawr::mods_service {
 namespace {
@@ -122,6 +127,7 @@ std::string timed_report(std::string report, std::uint64_t elapsed) {
     report.pop_back();
     return report + ",\"elapsed_ms\":" + std::to_string(elapsed) + '}';
 }
+#ifdef _WIN32
 std::wstring quote(const fs::path& path) {
     // Windows argv escaping, including backslashes before a closing quote.
     std::wstring out = L"\""; unsigned slashes{};
@@ -137,6 +143,20 @@ fs::path helper_path() {
     const auto count = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
     path.resize(count);
     return fs::path(path).parent_path() / "eawr_loadcheck.exe";
+}
+#else
+fs::path helper_path() {
+    return fs::read_symlink("/proc/self/exe").parent_path() / "eawr_loadcheck";
+}
+#endif
+bool replace_file(const fs::path& from, const fs::path& to) {
+#ifdef _WIN32
+    return MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    std::error_code ec;
+    fs::rename(from, to, ec);
+    return !ec;
+#endif
 }
 std::string error_line(std::uint64_t id, std::string_view code, std::string_view message) {
     return "{\"id\":" + std::to_string(id) + ",\"error\":{\"code\":" + json_quote(code) + ",\"message\":" + json_quote(message)
@@ -174,6 +194,7 @@ std::string index_warning(const std::string& report) {
     auto encoded = encode(*parsed);
     return encoded.size() <= kLineLimit - kReportEnvelopeBytes ? encoded : report;
 }
+#ifdef _WIN32
 struct Handle {
     HANDLE value = nullptr;
     ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
@@ -186,13 +207,16 @@ struct Attributes {
     LPPROC_THREAD_ATTRIBUTE_LIST list{};
     ~Attributes() { if (list) DeleteProcThreadAttributeList(list); }
 };
+#endif
 }
 struct LoadCheck::State {
     std::thread worker;
     std::atomic<bool> running{false}, cancelled{false};
     std::uint64_t request{};
     std::mutex mutex;
+#ifdef _WIN32
     HANDLE job{};
+#endif
     std::string profile_id;
     std::string cached_key;
     fs::file_time_type cached_stamp{};
@@ -202,7 +226,11 @@ struct LoadCheck::State {
 LoadCheck::LoadCheck(Service& s) : state_(std::make_unique<State>()), service_(s) {}
 LoadCheck::~LoadCheck() { stop(); }
 void LoadCheck::stop() {
-    { std::lock_guard lock(state_->mutex); if (state_->running) state_->cancelled = true; if (state_->job) TerminateJobObject(state_->job, 9); }
+    { std::lock_guard lock(state_->mutex); if (state_->running) state_->cancelled = true;
+#ifdef _WIN32
+      if (state_->job) TerminateJobObject(state_->job, 9);
+#endif
+    }
     if (state_->worker.joinable()) state_->worker.join();
 }
 void LoadCheck::forget_profile(const std::string_view id) {
@@ -210,7 +238,9 @@ void LoadCheck::forget_profile(const std::string_view id) {
     // Deletion cannot race a completed worker into recreating the marker.
     if (state_->running && state_->profile_id == id) {
         state_->cancelled = true;
+#ifdef _WIN32
         if (state_->job) TerminateJobObject(state_->job, 9);
+#endif
     }
     const auto cache = safe_folder(service_.model.user_data, {"mods", "cache", "loadcheck"});
     std::error_code ec;
@@ -235,12 +265,18 @@ std::optional<Reply> LoadCheck::start(std::uint64_t id, const J& params) {
         try {
             const auto key = fingerprint(prepared.profile, game, build);
             // The profile snapshot contains the same resolved roots the service showed.
-            scratch = prepared.cache / ("running-" + std::to_string(GetCurrentProcessId()) + ".json");
-            const auto report_path = fs::path(scratch.native() + L".report");
-            const auto marker_path = fs::path(scratch.native() + L".last");
-            files_path = fs::path(scratch.native() + L".files");
+#ifdef _WIN32
+            const auto pid = GetCurrentProcessId();
+#else
+            const auto pid = ::getpid();
+#endif
+            scratch = prepared.cache / ("running-" + std::to_string(pid) + ".json");
+            const auto report_path = fs::path(scratch).concat(".report");
+            const auto marker_path = fs::path(scratch).concat(".last");
+            files_path = fs::path(scratch).concat(".files");
             if (fs::exists(scratch) || fs::exists(report_path) || fs::exists(files_path) || fs::exists(marker_path)) throw std::runtime_error("load check scratch already exists");
             { std::ofstream snapshot(scratch, std::ios::binary); snapshot << mods::profile_to_json(prepared.profile); if (!snapshot) throw std::runtime_error("cannot write profile snapshot"); }
+#ifdef _WIN32
             Handle read, write, sink, job, process, thread;
             SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
             if (!CreatePipe(&read.value, &write.value, &security, 0) || !SetHandleInformation(read.value, HANDLE_FLAG_INHERIT, 0)) throw std::runtime_error("cannot create helper pipe");
@@ -298,6 +334,30 @@ std::optional<Reply> LoadCheck::start(std::uint64_t id, const J& params) {
                 std::chrono::steady_clock::now() - started).count());
             DWORD exit{}; GetExitCodeProcess(process.value, &exit);
             { std::lock_guard lock(state_->mutex); if (state_->job) CloseHandle(state_->job); state_->job = nullptr; }
+#else
+            std::string line, report;
+            bool invalid = false;
+            const auto started = std::chrono::steady_clock::now();
+            const auto helper = executable.empty() ? helper_path() : executable;
+            const auto exit = run_posix_helper({helper, scratch, user, report_path, game,
+                mods::steam::path_from_utf8(key), files_path}, state_->cancelled, [&](std::string_view bytes) {
+                for (const auto c : bytes) {
+                    if (c != '\n') { if (line.size() < kLineLimit) line += c; else invalid = true; continue; }
+                    const auto message = mods::steam::parse_json(line);
+                    if (!message || message->kind != J::Kind::object) invalid = true;
+                    else if (const auto* final = message->member("report"); final && final->kind == J::Kind::object && valid_report(*final) && report.empty()) report = encode(*final);
+                    else if (message->string_member("stage") && json_count(message->member("done")) && json_count(message->member("total"))) {
+                        const auto event = "{\"event\":\"loadcheck.progress\",\"id\":" + std::to_string(id) + ",\"data\":" + encode(*message) + '}';
+                        if (event.size() > kLineLimit) invalid = true;
+                        else if (!state_->cancelled) emit(event);
+                    } else invalid = true;
+                    line.clear();
+                }
+                return !invalid;
+            });
+            const auto elapsed = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count());
+#endif
             if (state_->cancelled) response = error_line(id, kCancelled, "load check cancelled");
             else if (exit != 0 || invalid || !line.empty() || report.empty()) throw std::runtime_error("load check helper failed or returned an invalid report");
             else {
@@ -316,7 +376,7 @@ std::optional<Reply> LoadCheck::start(std::uint64_t id, const J& params) {
                         if (!mods::read_file_index(index_stream, key)) throw std::runtime_error("invalid file index from helper");
                         index_stream.close();
                         if (fs::is_symlink(fs::symlink_status(files_cache))) throw std::runtime_error("unsafe file index cache");
-                        if (!MoveFileExW(files_path.c_str(), files_cache.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                        if (!replace_file(files_path, files_cache))
                             throw std::runtime_error("cannot install file index cache");
                         installed_index = true;
                     }
@@ -329,23 +389,25 @@ std::optional<Reply> LoadCheck::start(std::uint64_t id, const J& params) {
                 if (fs::is_symlink(fs::symlink_status(cache))) throw std::runtime_error("unsafe cache file");
                 // The helper's report file is private scratch; install the validated stdout report atomically.
                 { std::ofstream file(report_path, std::ios::binary | std::ios::trunc); file << report; if (!file) throw std::runtime_error("cannot cache report"); }
-                if (!MoveFileExW(report_path.c_str(), cache.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("cannot install cached report");
+                if (!replace_file(report_path, cache)) throw std::runtime_error("cannot install cached report");
                 const auto marker = history_path(prepared.cache, prepared.profile.id);
                 if (fs::is_symlink(fs::symlink_status(marker))) throw std::runtime_error("unsafe history file");
                 { std::ofstream file(marker_path, std::ios::binary | std::ios::trunc);
                   file << "{\"version\":1,\"chain_fingerprint\":" << json_quote(key) << ",\"elapsed_ms\":" << elapsed << '}';
                   if (!file) throw std::runtime_error("cannot cache history"); }
-                if (!MoveFileExW(marker_path.c_str(), marker.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                if (!replace_file(marker_path, marker))
                     throw std::runtime_error("cannot install load check history");
                 response = "{\"id\":" + std::to_string(id) + ",\"result\":{\"report\":" + report + "}}";
                 state_->running = false;
             }
             std::error_code ec; fs::remove(report_path, ec);
         } catch (const std::exception& e) {
+#ifdef _WIN32
             { std::lock_guard lock(state_->mutex); if (state_->job) CloseHandle(state_->job); state_->job = nullptr; }
+#endif
             response = error_line(id, state_->cancelled ? kCancelled : kInternalError, state_->cancelled ? "load check cancelled" : e.what());
         }
-        if (!scratch.empty()) { std::error_code ec; fs::remove(scratch, ec); fs::remove(fs::path(scratch.native() + L".report"), ec); fs::remove(fs::path(scratch.native() + L".last"), ec); }
+        if (!scratch.empty()) { std::error_code ec; fs::remove(scratch, ec); fs::remove(fs::path(scratch).concat(".report"), ec); fs::remove(fs::path(scratch).concat(".last"), ec); }
         { std::lock_guard lock(state_->mutex);
             if (state_->cancelled) response = error_line(id, kCancelled, "load check cancelled");
             { std::error_code ec; if (!files_path.empty()) fs::remove(files_path, ec); }
@@ -392,7 +454,9 @@ Reply LoadCheck::cancel(const J& params) {
     const bool active = state_->running && state_->request == *request;
     if (active) {
         state_->cancelled = true;
+#ifdef _WIN32
         if (state_->job) TerminateJobObject(state_->job, 9);
+#endif
     }
     return Reply::ok(active ? "{\"cancelled\":true}" : "{\"cancelled\":false}");
 }

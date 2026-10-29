@@ -185,13 +185,15 @@ Reply method_game_find(Service& service, const J& params) {
             const auto validation = launcher::validate_install(*saved.game_root);
             if (validation.ok) { root = validation.root; kind = install_kind(root); }
         }
-#ifdef _WIN32
         if (root.empty()) {
+#ifdef _WIN32
             const auto registry = launcher::make_windows_registry();
             const auto installs = launcher::discover_installs(*registry);
+#else
+            const auto installs = launcher::discover_installs();
+#endif
             if (!installs.empty()) { root = installs.front().root; kind = installs.front().source == "Steam" ? "steam" : "other"; }
         }
-#endif
         if (root.empty()) diagnostics.push_back({"EAWR-MODS-SVC-0012", "No Forces of Corruption installation found"});
     }
     m.game_root = root;
