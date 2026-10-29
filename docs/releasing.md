@@ -1,8 +1,9 @@
 # Releasing
 
-Release assets are built on the pool from the exact public tag. The public repository's
-`.github/workflows/release.yml` only verifies native Linux ARM64 and Apple Silicon after publication. Nothing is published automatically: a maintainer
-reviews and publishes the **draft** release.
+CI builds and tests native Linux GCC and Windows MSVC Release and Debug configurations.
+It builds Linux and Windows viewer extensions in Release and Debug, without running GPU gameplay tests or uploading packaged artifacts.
+Manual release builds retain the exact-tag, provenance, hash, and owner approval gates below.
+Nothing is published automatically.
 
 ## Private crash symbols
 
@@ -244,6 +245,20 @@ Each archive carries `LICENSE`, `THIRD_PARTY_NOTICES.md` and `README.md`. Tools 
 `tools/release/readme-tools.md` and `tools/release/readme-viewer.md` respectively; the player and Debug
 archives keep the player guide, with the separate Debug guide in the Debug archive. Pool assets
 carry a source/build/hash receipt; do not claim a hosted attestation for these bytes.
+
+### Linux player and Debug artifacts
+
+Build Linux AppImages with `tools/release/package_linux_player.py`.
+For Debug, pass `--debug --build-dir <rootDebug> --viewer-build-dir <viewerDebug>`; both build caches must be configured as Debug.
+The extension and every headless tool carry embedded DWARF, not PDBs, and the package includes `DEBUG-BUILD.md`.
+The canonical output is `eaw-revised-<version>-linux-x64-debug.AppImage`, with a matching AppDir and SHA256 sidecar.
+`--development` labels and validates local dirty builds and does not select the Debug configuration.
+
+Run `tools/release/fresh_user/run_linux_fresh_user.py` separately for player and Debug artifacts with `--package`, `--kind`, `--expected-sha256`, `--game-root`, `--source`, and `--out`.
+It requires installed game data, a Linux graphics desktop and GPU, and renderer helper sources from the source checkout.
+It runs all nine shared cases without skips against an isolated read-only copy and records a suite log, receipt, and verdict.
+The runner extracts AppImages, so mounted-image/FUSE behavior remains a separate manual check.
+Documenting this gate does not mean any particular Linux artifact has passed acceptance.
 
 ## Fresh-user gate and host-side packaging (maintainer tools)
 
