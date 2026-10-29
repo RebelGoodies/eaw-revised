@@ -262,6 +262,13 @@ set_target_properties(eawr_viewer PROPERTIES
     PDB_OUTPUT_DIRECTORY "$<1:${PROJECT_BIN}>"
 )
 eawr_target_symbols(eawr_viewer)
+# Packaging must not pick up another build's extension from the shared project/bin.
+add_custom_command(TARGET eawr_viewer POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/artifacts/$<CONFIG>"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:eawr_viewer>"
+        "${CMAKE_BINARY_DIR}/artifacts/$<CONFIG>/$<TARGET_FILE_NAME:eawr_viewer>"
+    VERBATIM
+)
 
 if(MSVC)
     target_compile_options(eawr_viewer_core PRIVATE /W4 /permissive- /EHsc)

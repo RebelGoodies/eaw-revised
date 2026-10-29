@@ -161,6 +161,64 @@ class LinuxPlayerTests(unittest.TestCase):
             (directory / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Debug\n")
         for name in MODULE.release.TOOLS:
             elf(self.args.build_dir / "apps" / name / name, ("1.0+" + self.commit + "+gcsync1").encode())
+        self.debug_extension = elf(self.args.viewer_build_dir / "artifacts/Debug" / MODULE.EXTENSION,
+                                   ("1.0+" + self.commit + "+gcsync1 debug snapshot").encode())
+
+    def test_debug_uses_build_snapshot_after_global_release_overwrite(self):
+        self.prepare_debug()
+        global_extension = self.project / "bin" / MODULE.EXTENSION
+        elf(global_extension, ("1.0+" + "b" * 40 + "+gcsync1 release with DWARF").encode())
+        with patch.object(MODULE, "run", side_effect=self.fake_run) as commands, \
+                patch.object(MODULE, "verify_player_identity", wraps=MODULE.verify_player_identity) as identity:
+            MODULE.stage(self.args, self.folder, self.importer)
+        inspected = identity.call_args.args[1]
+        self.assertIn((self.debug_extension, True), inspected)
+        self.assertNotIn((global_extension, True), inspected)
+        dwarf_inputs = [call.args[0][-1] for call in commands.call_args_list
+                        if call.args[0][1] == "--section-headers"]
+        self.assertIn(str(self.debug_extension), dwarf_inputs)
+        self.assertNotIn(str(global_extension), dwarf_inputs)
+        self.assertEqual((self.folder / "project/bin" / MODULE.EXTENSION).read_bytes(),
+                         self.debug_extension.read_bytes())
+        self.debug_extension.unlink()
+        # Even a matching global extension with source symbols is not a build-local Debug artifact.
+        elf(global_extension, ("1.0+" + self.commit + "+gcsync1 release with DWARF").encode())
+        with patch.object(MODULE, "run", side_effect=self.fake_run):
+            with self.assertRaisesRegex(ValueError, "snapshot.*rebuild"):
+                MODULE.stage(self.args, self.folder, self.importer)
+        elf(self.debug_extension, ("1.0+" + "b" * 40 + "+gcsync1 stale snapshot").encode())
+        with patch.object(MODULE, "run", side_effect=self.fake_run):
+            with self.assertRaisesRegex(ValueError, "not the packaged commit"):
+                MODULE.stage(self.args, self.folder, self.importer)
+
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("c++"), "CMake and C++ compiler required")
+    def test_viewer_post_build_snapshot_is_configuration_local(self):
+        cmake = (ROOT / "apps/viewer/CMakeLists.txt").read_text()
+        start = cmake.index("add_custom_command(TARGET eawr_viewer POST_BUILD")
+        snapshot_command = cmake[start:cmake.index("\n)", start) + 2]
+        source = self.root / "snapshot fixture"
+        source.mkdir()
+        shared_bin = self.root / "shared project bin"
+        (source / "viewer.cpp").write_text('extern "C" int fixture() { return 42; }\n')
+        (source / "CMakeLists.txt").write_text(
+            'cmake_minimum_required(VERSION 3.25)\nproject(SnapshotFixture LANGUAGES CXX)\n'
+            'add_library(eawr_viewer SHARED viewer.cpp)\n'
+            'set_target_properties(eawr_viewer PROPERTIES PREFIX "" SUFFIX ""\n'
+            f'    OUTPUT_NAME "{MODULE.EXTENSION}" LIBRARY_OUTPUT_DIRECTORY "{shared_bin.as_posix()}"\n'
+            f'    RUNTIME_OUTPUT_DIRECTORY "{shared_bin.as_posix()}")\n{snapshot_command}\n')
+        snapshots = {}
+        for configuration in ("Debug", "Release"):
+            build = self.root / (configuration + " fixture build")
+            for command in (["cmake", "-S", str(source), "-B", str(build), f"-DCMAKE_BUILD_TYPE={configuration}"],
+                            ["cmake", "--build", str(build), "--config", configuration, "--target", "eawr_viewer"]):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            snapshot = build / "artifacts" / configuration / MODULE.EXTENSION
+            snapshots[configuration] = snapshot.read_bytes()
+            self.assertEqual(snapshots[configuration], (shared_bin / MODULE.EXTENSION).read_bytes())
+        self.assertNotEqual(snapshots["Debug"], snapshots["Release"])
+        self.assertEqual((self.root / "Debug fixture build/artifacts/Debug" / MODULE.EXTENSION).read_bytes(),
+                         snapshots["Debug"])
 
     def test_debug_payload_retains_symbols_tools_and_identity_checks(self):
         self.prepare_debug()
@@ -173,7 +231,7 @@ class LinuxPlayerTests(unittest.TestCase):
         self.assertFalse(manifest["development"])
         self.assertIn("GDB", (self.folder / "DEBUG-BUILD.md").read_text())
         self.assertEqual((self.folder / "project/bin" / MODULE.EXTENSION).read_bytes(),
-                         (self.project / "bin" / MODULE.EXTENSION).read_bytes())
+                         self.debug_extension.read_bytes())
         for name in MODULE.release.TOOLS:
             binary = self.folder / "tools" / name
             self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
@@ -188,7 +246,7 @@ class LinuxPlayerTests(unittest.TestCase):
 
     def test_debug_requires_explicit_debug_builds_tools_and_dwarf(self):
         self.prepare_debug()
-        extension = self.project / "bin" / MODULE.EXTENSION
+        extension = self.debug_extension
         for option in ("build_dir", "viewer_build_dir"):
             original = getattr(self.args, option)
             setattr(self.args, option, None)
@@ -225,7 +283,10 @@ class LinuxPlayerTests(unittest.TestCase):
                 MODULE.stage(self.args, self.folder, self.importer)
 
     def dirty_binaries(self):
-        for binary in (self.project / "bin" / MODULE.EXTENSION, self.service):
+        binaries = [self.project / "bin" / MODULE.EXTENSION, self.service]
+        if hasattr(self, "debug_extension"):
+            binaries.append(self.debug_extension)
+        for binary in binaries:
             elf(binary, ("0.1.0+" + self.commit + "+dirty+gcsync2").encode())
 
     def test_default_rejects_dirty_binaries(self):
@@ -459,6 +520,27 @@ class LinuxPlayerTests(unittest.TestCase):
                     self.assertEqual((occupied / "other-release").read_text(), "keep")
                 else:
                     self.assertEqual(occupied.read_text(), "other release image")
+
+    def test_cli_preserves_files_added_to_appdir_claim_before_replacement(self):
+        argv = self.prepare_cli()
+        appdir = self.output / "eaw-revised-v1-linux-x64-player.AppDir"
+        sentinel = appdir / "other-process-file"
+        replace = Path.replace
+
+        def populate_claim(source, target):
+            self.assertEqual(target, appdir)
+            sentinel.write_text("keep")
+            return replace(source, target)
+
+        with patch.object(Path, "replace", populate_claim), \
+                patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(MODULE.main(argv), 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(list(self.output.iterdir()), [appdir])
+        self.assertEqual(list(appdir.iterdir()), [sentinel])
+        self.assertEqual(sentinel.read_text(), "keep")
+        self.assertFalse(appdir.with_suffix(".AppImage").exists())
+        self.assertFalse(appdir.with_suffix(".AppImage.sha256").exists())
 
     def test_cli_rolls_back_failed_publication_and_allows_retry(self):
         argv = self.prepare_cli()

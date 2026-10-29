@@ -1,7 +1,7 @@
 # EaW Revised: debug build
 
-The debug archive (`eaw-revised-<version>-windows-x64-debug.zip`) is the same game as the player zip, built
-in the compiler's Debug configuration. Use it to reproduce a crash or a wrong result so that a bug report
+The Windows debug archive (`eaw-revised-<version>-windows-x64-debug.zip`) is the same game as the player zip, built
+in the compiler's Debug configuration. A separate Linux Debug package is available as an AppImage and AppDir. Use it to reproduce a crash or a wrong result so that a bug report
 can name the exact function; use the normal player zip to play.
 
 ## What is different
@@ -16,6 +16,11 @@ can name the exact function; use the normal player zip to play.
   speed. Do not judge performance with this build.
 - **It carries the headless tools.** `tools\` holds the same programs as the tools zip (`sim_headless.exe`,
   the scanners and benchmarks), also in the Debug configuration, each with its `.pdb`.
+
+Linux Debug packages use the canonical `eaw-revised-<version>-linux-x64-debug.AppImage` name and include `DEBUG-BUILD.md`.
+The viewer extension and headless tools retain embedded DWARF sections for GDB or LLDB; they do not use PDB files.
+The pinned Godot runtime and launcher helpers are shared with the player package, not rebuilt as Debug.
+Use the player package for normal play and performance measurements.
 
 The folder is laid out like the player zip: double-click `EAWR.exe`, which starts the bundled Godot with the
 debug viewer extension in `project\bin`. Everything in [the player guide](README.md) applies, including where

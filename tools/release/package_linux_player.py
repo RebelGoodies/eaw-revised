@@ -274,6 +274,9 @@ def debug_inputs(args, extension: Path) -> list[Path]:
         cache = (directory / "CMakeCache.txt").read_text(encoding="utf-8")
         if not re.search(r"^CMAKE_BUILD_TYPE:STRING=Debug$", cache, re.MULTILINE):
             raise ValueError(f"--{option.replace('_', '-')} must be configured with CMAKE_BUILD_TYPE=Debug")
+    if not extension.is_file():
+        raise ValueError(f"missing Debug viewer snapshot: {extension}; rebuild eawr_viewer in --viewer-build-dir "
+                         "(use --clean-first if the target is up to date)")
     tools = [release.find_tool(args.build_dir, name, "", "Debug") for name in release.TOOLS]
     for binary in (extension, *tools):
         if not is_elf(binary):
@@ -284,21 +287,21 @@ def debug_inputs(args, extension: Path) -> list[Path]:
     return tools
 
 
-def copy_viewer_project(project: Path) -> None:
+def copy_viewer_project(project: Path, extension: Path) -> None:
     for source in sorted(release.VIEWER_PROJECT.rglob("*")):
         relative = source.relative_to(release.VIEWER_PROJECT)
         if not source.is_file() or ".godot" in relative.parts or source.suffix.lower() == ".pdb":
             continue
-        if relative.parts[0] == "bin" and relative != Path("bin") / EXTENSION:
+        if relative.parts[0] == "bin":
             continue
         if source.is_symlink():
             raise ValueError(f"symlink in project: {source}")
         target = project / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-    if not is_elf(project / "bin" / EXTENSION):
-        raise ValueError("viewer extension must be a Linux x86_64 ELF")
-    (project / "bin" / EXTENSION).chmod(0o755)
+    if extension.is_symlink():
+        raise ValueError(f"symlink in project: {extension}")
+    copy_executable(extension, project / "bin" / EXTENSION)
 
 
 def stage_desktop_files(args, folder: Path) -> None:
@@ -346,6 +349,8 @@ def stage(args, folder: Path, importer=None) -> None:
         raise ValueError("--with-mods-manager is blocked until the private manager is validated on Linux")
     runtime_pin = verify_runtime(args.godot, args.runtime_pin, args.library_root)
     extension = release.VIEWER_PROJECT / "bin" / EXTENSION
+    if args.debug and args.viewer_build_dir is not None:
+        extension = args.viewer_build_dir / "artifacts/Debug" / EXTENSION
     tools = debug_inputs(args, extension)
     binaries = [(extension, True), (args.launcher, False), (args.mods_service, True), (args.loadcheck, False)]
     binaries.extend((tool, False) for tool in tools)
@@ -356,7 +361,7 @@ def stage(args, folder: Path, importer=None) -> None:
     for tool in tools:
         copy_executable(tool, folder / "tools" / tool.name)
     project = folder / "project"
-    copy_viewer_project(project)
+    copy_viewer_project(project, extension)
     check_hash(folder / GODOT_NAME, runtime_pin["sha256"])
     # Stage the importer's library closure before running the bundled editor.
     audit_libraries(folder, args.library_root)
@@ -438,14 +443,25 @@ def build_verified_image(args, staged: Path, image: Path, tool_env: dict) -> Non
     image.chmod(0o755)
 
 
+def publish_appdir(staged: Path, appdir: Path) -> None:
+    appdir.mkdir()  # Atomically claim publication before replacing our empty directory.
+    try:
+        staged.replace(appdir)
+    except OSError:
+        try:
+            appdir.rmdir()
+        except OSError:
+            pass  # Leave a populated claim untouched and preserve the replacement error.
+        raise
+
+
 def publish_outputs(staged: Path, built_image: Path, staged_sums: Path, appdir: Path) -> None:
     image = appdir.with_suffix(".AppImage")
     sums = image.with_suffix(".AppImage.sha256")
     published = []
     try:
-        appdir.mkdir()  # Atomically claim publication before replacing our empty directory.
+        publish_appdir(staged, appdir)
         published.append(appdir)
-        staged.replace(appdir)
         for source, target in ((built_image, image), (staged_sums, sums)):
             os.link(source, target)
             published.append(target)

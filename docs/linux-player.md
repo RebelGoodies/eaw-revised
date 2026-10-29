@@ -1,6 +1,6 @@
 # Linux player AppImage
 
-The Linux x86_64 player contains the patched Godot editor runtime and the preimported viewer project.
+The Linux x64 player contains the patched Godot editor runtime and the preimported viewer project.
 It starts through a native launcher and needs no Python installation to play.
 Retail game files and fonts are not included.
 Point the launcher at your own supported game installation.
@@ -11,9 +11,9 @@ Make the downloaded image executable and start it from a terminal or your file m
 The safe render-thread option is passed through to the native launcher.
 
 ```sh
-chmod +x eaw-revised-vVERSION-linux-x86_64-player.AppImage
-./eaw-revised-vVERSION-linux-x86_64-player.AppImage
-./eaw-revised-vVERSION-linux-x86_64-player.AppImage --safe-render-thread
+chmod +x eaw-revised-vVERSION-linux-x64-player.AppImage
+./eaw-revised-vVERSION-linux-x64-player.AppImage
+./eaw-revised-vVERSION-linux-x64-player.AppImage --safe-render-thread
 ```
 
 On systems without FUSE, extract the image and run its AppRun entry point.
@@ -21,14 +21,18 @@ Keep the extracted files together, including the hidden project/.godot directory
 Paths containing spaces are supported.
 
 ```sh
-./eaw-revised-vVERSION-linux-x86_64-player.AppImage --appimage-extract
+./eaw-revised-vVERSION-linux-x64-player.AppImage --appimage-extract
 ./squashfs-root/AppRun --safe-render-thread
 ```
 
 The host supplies glibc, its ELF loader and graphics drivers.
 A working desktop graphics stack is required.
 The oldest supported distribution must be validated with the actual release build because an AppImage does not lower its binaries' glibc requirements.
-The private mods manager is not yet validated on Linux and packaging it is explicitly blocked.
+The private mods manager UI is not included and remains blocked on Linux.
+The public `EAWR` entry starts `AppRun`; `EAWR (Safe render thread)` starts `AppRun --safe-render-thread`.
+The public `EAWR Mods` entry runs the bundled `run.sh` with `EAWR_PLAYER` set to `AppRun`.
+The internal `eawr-launcher` entry remains unchanged.
+The bundled `run.sh` provides the optional Workshop mod menu without the private manager UI.
 
 ## Release inputs
 
@@ -185,11 +189,37 @@ python3 tools/release/package_linux_player.py \
   --version local --out out/local-player
 ```
 
-This produces `eaw-revised-local-linux-x86_64-player-development.AppDir`, `.AppImage`, and `.AppImage.sha256` under `out/local-player`.
+This produces `eaw-revised-local-linux-x64-player-development.AppDir`, `.AppImage`, and `.AppImage.sha256` under `out/local-player`.
 The manifest records `development: true` and the actual observed `build_dirty` boolean.
 A development artifact built from clean binaries records `build_dirty: false` and retains its development filename suffix.
 
 ## Output and verification
+
+### Debug artifacts
+
+Add `--debug --build-dir out/build/rootDebug --viewer-build-dir out/build/viewerDebug` to the packaging command.
+Both directories must have `CMAKE_BUILD_TYPE=Debug` caches.
+Build the Debug inputs separately so later Release builds cannot replace their packaged extension.
+
+```sh
+cmake -S . -B out/build/rootDebug -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DEAWR_BUILD_PLAYER=ON
+cmake --build out/build/rootDebug --parallel 8
+cmake -S apps/viewer -B out/build/viewerDebug -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DEAWR_GODOT_CPP_ROOT="$PWD/out/godot-cpp"
+cmake --build out/build/viewerDebug --target eawr_viewer --parallel 8
+NATIVE_LAUNCHER="$PWD/out/build/rootDebug/apps/launcher/eawr-launcher"
+NATIVE_BIN="$PWD/out/build/rootDebug/apps/mods_service"
+```
+
+The viewer build preserves its extension under `artifacts/Debug/` inside its build directory.
+Debug packaging uses that snapshot instead of the shared `project/bin` copy.
+Rebuild older viewer builds with `--clean-first` if their snapshot is missing.
+The extension and every headless tool retain embedded DWARF and are rejected if `.debug_info` or `.debug_line` is missing.
+The generated package includes `DEBUG-BUILD.md`; Linux Debug packages do not use PDB files.
+`--development` is a separate dirty-build qualifier and does not select the build configuration.
+
+Debug outputs use `eaw-revised-vVERSION-linux-x64-debug.AppDir`, `eaw-revised-vVERSION-linux-x64-debug.AppImage`, and the `.AppImage.sha256` sidecar.
 
 Packaging produces the AppDir, an executable type-2 AppImage, and an AppImage SHA256 sidecar.
 Existing AppDir or AppImage outputs are refused.
@@ -197,6 +227,10 @@ The AppDir contains this layout.
 
 ```text
 AppRun
+EAWR
+EAWR (Safe render thread)
+EAWR Mods
+run.sh
 eawr-launcher
 eawr_mods_service
 eawr_loadcheck
@@ -221,8 +255,8 @@ The build machine's host dependency paths and hashes are audit evidence, not a p
 
 ```sh
 cd out/release
-sha256sum -c eaw-revised-vVERSION-linux-x86_64-player.AppImage.sha256
-cd eaw-revised-vVERSION-linux-x86_64-player.AppDir
+sha256sum -c eaw-revised-vVERSION-linux-x64-player.AppImage.sha256
+cd eaw-revised-vVERSION-linux-x64-player.AppDir
 sha256sum -c SHA256SUMS
 ```
 
