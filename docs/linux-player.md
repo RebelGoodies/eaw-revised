@@ -50,6 +50,35 @@ The packager never configures or builds the root project and never uses stock Go
   Passing this runtime explicitly prevents appimagetool from downloading one.
 - Cached pinned third-party license texts used by the existing Windows packager, or network access for that existing hash-verified license cache.
 
+## Interactive mod launcher
+
+Run `./run.sh` from the source checkout, or place the script beside a player AppImage or `eawr-launcher`.
+It scans native and Flatpak Steam locations and additional libraries from `libraryfolders.vdf` for installed Workshop mods for app 32470.
+It also scans the installed game's `Mods` and `corruption/Mods` folders, including nonnumeric mod folder names.
+The game root comes from `--game-root`, then `EAWR_EAW_GAME_ROOT` or `EAW_GAME_ROOT`, otherwise Steam libraries' `steamapps/common` folders containing both `GameData` and `corruption`.
+Mod names come from `modinfo.json` when present and appear as `Name (ID or folder)`.
+Unnamed mods and names requiring JSON escape decoding show only their ID or folder name once.
+Missing mod directories, including an `EAWR_WORKSHOP_DIR` override, are skipped.
+If no mods are found, the script launches vanilla.
+
+- Type a displayed number and press Enter to launch that mod.
+- Alternatively, move with Up/Down, press Space to select or deselect, then Enter to launch.
+- Enter with no selection launches without mods. Moving the highlight alone does not select a mod.
+- Press `q` or Ctrl+C to quit.
+
+The script requires Bash and standard system utilities, with no Python, `jq`, or terminal-menu package.
+Small terminals use the numbered prompt instead of the arrow-key menu.
+It selects one mod at a time and does not automatically add a submod's dependencies.
+Pass launcher options normally, or override discovery with environment variables.
+
+```sh
+./run.sh
+./run.sh --safe-render-thread
+./run.sh --game-root "/path/to/Star Wars Empire at War"
+EAWR_PLAYER="/path/to/player.AppImage" \
+  EAWR_WORKSHOP_DIR="/path/to/steamapps/workshop/content/32470" ./run.sh
+```
+
 ## Building the inputs
 
 Build from the repository root with a C++ toolchain, CMake, Ninja, Git, pkg-config, and GTK3 development files installed.
