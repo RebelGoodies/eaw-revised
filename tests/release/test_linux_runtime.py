@@ -96,7 +96,8 @@ class SourceTests(unittest.TestCase):
             runtime.verify_source(self.source)
 
     def test_jobs_limit_is_checked_before_build(self):
-        with patch.object(runtime.os, "geteuid", return_value=1000):
+        with (patch.object(runtime.os, "geteuid", return_value=1000),
+              patch.object(runtime.platform, "machine", return_value="x86_64")):
             with self.assertRaisesRegex(ValueError, "between 1 and 8"):
                 runtime.build(self.source, self.source.parent / "runtime", 9)
 
@@ -109,6 +110,7 @@ class SourceTests(unittest.TestCase):
         built.write_bytes(elf)
         with tempfile.TemporaryDirectory() as output:
             with (patch.object(runtime.os, "geteuid", return_value=1000),
+                  patch.object(runtime.platform, "machine", return_value="x86_64"),
                   patch.object(runtime, "verify_source", return_value={
                       "repository": runtime.REPOSITORY, "revision": runtime.REVISION}),
                   patch.object(runtime, "capture", side_effect=[
@@ -130,6 +132,7 @@ class SourceTests(unittest.TestCase):
     def test_failed_build_never_emits_pin(self):
         with tempfile.TemporaryDirectory() as output:
             with (patch.object(runtime.os, "geteuid", return_value=1000),
+                  patch.object(runtime.platform, "machine", return_value="x86_64"),
                   patch.object(runtime, "capture", side_effect=["gcc", "g++", __file__]),
                   patch.object(runtime, "verify_source", return_value={}),
                   patch.object(runtime.subprocess, "run", side_effect=subprocess.CalledProcessError(2, "scons"))):
@@ -147,6 +150,7 @@ class SourceTests(unittest.TestCase):
         built.write_bytes(header)
         with tempfile.TemporaryDirectory() as output:
             with (patch.object(runtime.os, "geteuid", return_value=1000),
+                  patch.object(runtime.platform, "machine", return_value="x86_64"),
                   patch.object(runtime, "verify_source", return_value={}),
                   patch.object(runtime, "capture", side_effect=["gcc", "g++", str(built), "stock-godot"]),
                   patch.object(runtime.subprocess, "run")):
@@ -163,6 +167,7 @@ class SourceTests(unittest.TestCase):
                 incremental = self.source / "existing-object.o"
                 incremental.write_bytes(b"incremental object")
                 with (patch.object(runtime.os, "geteuid", return_value=1000),
+                      patch.object(runtime.platform, "machine", return_value="x86_64"),
                       patch.object(runtime, "verify_source", return_value={}),
                       patch.object(runtime, "capture", side_effect=["gcc", "g++", missing]) as capture,
                       patch.object(runtime.subprocess, "run") as run):

@@ -71,6 +71,10 @@ add_test(
 )
 
 # The release packager (tools/release, docs/releasing.md) on a stand-in build tree.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME ci_linux_player_packaging COMMAND "${Python3_EXECUTABLE}" -m unittest discover
+             -s "${PROJECT_SOURCE_DIR}/tests/release" -p "test_*.py")
+endif()
 
 
 
@@ -115,4 +119,3 @@ eawr_add_python_contract(python_presentation_renderer_viewer_galactic_wheel_zoom
 eawr_add_python_contract(python_presentation_renderer_viewer_story_summary_runtime tests.presentation.renderer.test_viewer_story_summary_runtime)
 
 eawr_label_tests(DEFAULT ci-tools)
-
