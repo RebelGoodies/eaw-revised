@@ -68,17 +68,18 @@ def run_case(executable, mode):
             return 1
         if silent:
             return 0
+        # ICE gathers a relay candidate per interface, not per peer. The peers above require both traffic directions.
         if mode == "nonce":
             print(f"TURN stale nonce replies: {server.stale_nonce_replies}")
             refreshes = [entry for entry in server.statistics() if entry["refreshes"] >= 3]
-            if server.stale_nonce_replies < 6 or len(refreshes) != 2:
-                print(f"Expected stale nonces to be answered and both allocations refreshed repeatedly, got "
+            if server.stale_nonce_replies < 6 or len(refreshes) < 2:
+                print(f"Expected stale nonces to be answered and at least two allocations refreshed repeatedly, got "
                       f"{server.stale_nonce_replies} stale replies and {server.statistics()}", file=sys.stderr)
                 return 1
-        # Both pairs must have repeated CreatePermission: one per half lifetime, at least three over the run.
+        # Require repeated CreatePermission for at least the two relay endpoints, across several lifetimes.
         refreshed = [entry for entry in server.statistics() if entry["permission_requests"] >= 3]
-        if len(refreshed) != 2:
-            print(f"Expected both allocations to refresh their permission repeatedly, got {server.statistics()}",
+        if len(refreshed) < 2:
+            print(f"Expected at least two allocations to refresh their permission repeatedly, got {server.statistics()}",
                   file=sys.stderr)
             return 1
         return 0

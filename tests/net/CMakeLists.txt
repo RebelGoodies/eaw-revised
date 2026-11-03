@@ -89,6 +89,8 @@ add_executable(net_gns_introduced_tests gns_introduced_tests.cpp)
 target_link_libraries(net_gns_introduced_tests PRIVATE eawr::net)
 eawr_target_project_warnings(net_gns_introduced_tests)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME net_gns_turn_fixture_contracts COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_gns_turn_processes.py")
 add_test(NAME net_gns_introduced_paths COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/gns_introduced_processes.py" "$<TARGET_FILE:net_gns_introduced_tests>")
 set_tests_properties(net_gns_introduced_paths PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
