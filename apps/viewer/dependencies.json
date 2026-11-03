@@ -38,6 +38,16 @@
       "name": "godot-cpp-LICENSE.md",
       "url": "https://raw.githubusercontent.com/godotengine/godot-cpp/507ed9d840c01a3c5b2a39af8bb4000bfac30bf5/LICENSE.md",
       "sha256": "26a5b210d90760156ce886267ce9df235787dcc6cebfd7ecd95ef5b6fdcc95bf"
+    },
+    {
+      "name": "GameNetworkingSockets-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/ValveSoftware/GameNetworkingSockets/d534c19aa760df3fb75fd20db13ba1932b8a5463/LICENSE",
+      "sha256": "6fedd796d51d7f996e0b3dc7c1c9f6a67603bec7a2cfb9f418e0c6607a1ca647"
+    },
+    {
+      "name": "protobuf-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/protocolbuffers/protobuf/f502b8e9c831bda0bea57d9cbeefca3eb76e4254/LICENSE",
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
     }
   ]
 }

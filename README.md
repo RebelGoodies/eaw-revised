@@ -58,7 +58,8 @@ What works today:
   effects on ships and visibility.
 - A front end with single-player and multiplayer menus, profiles, settings, saved games and replays.
 - LAN lobbies and lockstep multiplayer, with desync detection and in-match reconnection, and online rooms
-  through an online service you enter in Network Options (Windows downloads; an early preview).
+  through an online service you enter in Network Options (Windows and Linux x64 players, early preview).
+  Native Windows and Linux builds use the same online protocol and require matching build and game/mod data.
 - A galactic campaign preview: the campaign map, fleets, production, and space and land battle entry, with an
   early galactic AI that is on by default (`--eawr-galactic-ai off` switches it off).
 - Reading a FoC installation: MEG archives and loose files through a virtual file system,
@@ -68,7 +69,8 @@ What works today:
 - A Lua 5.0.2 script host and a sandboxed, deterministic Lua VM for gameplay scripts.
 
 Limits: FoC only. Galactic Conquest is partial and its AI is early; mod support is unfinished; online
-play is an early preview and the Linux downloads have no online play. Combat balance, some abilities and visual effects
+play is an early preview. Multiplayer connects native project builds, not original retail clients.
+Combat balance, some abilities and visual effects
 still need comparison with the original game, and frame-time spikes can occur in larger battles on older
 graphics cards; please use the reporting steps below when they do.
 The [roadmap](plan/backlog.md) and [phase plans](plan/) say what comes next.

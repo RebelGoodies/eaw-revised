@@ -46,6 +46,9 @@ class LinuxPlayerTests(unittest.TestCase):
         self.launcher = elf(self.root / "launcher")
         self.service = elf(self.root / "service", identity)
         self.loadcheck = elf(self.root / "loadcheck")
+        self.online_test = elf(self.root / "eawr_online_test", identity)
+        self.viewer_build = self.root / "Release viewer"
+        self.extension = elf(self.viewer_build / "artifacts/Release" / MODULE.EXTENSION, identity)
         self.pin = self.root / "runtime-pin.json"
         self.pin_data = {"schema": "eawr-linux-runtime-pin/1", "identity": MODULE.GODOT_IDENTITY,
                          "sha256": MODULE.release.sha256_file(self.godot),
@@ -57,7 +60,8 @@ class LinuxPlayerTests(unittest.TestCase):
                                        mods_service=self.service, loadcheck=self.loadcheck,
                                        expect_identity=self.commit, library_root=[], library_notices=None,
                                        with_mods_manager=False, development=False, debug=False,
-                                       build_dir=None, viewer_build_dir=None, tool_record={"sha256": "test-tool"})
+                                       build_dir=None, viewer_build_dir=self.viewer_build, online_test=self.online_test,
+                                       tool_record={"sha256": "test-tool"})
         self.folder = self.root / "player.AppDir"
         self.folder.mkdir()
         self.enter(patch.object(MODULE.release, "VIEWER_PROJECT", self.project))
@@ -114,13 +118,17 @@ class LinuxPlayerTests(unittest.TestCase):
                 probe.assert_not_called()
 
     def test_stage_import_modes_manifest_and_payload(self):
+        # A later build may have replaced the shared project/bin extension.
+        elf(self.project / "bin" / MODULE.EXTENSION, ("1.0+" + "b" * 40 + "+gcsync1").encode())
         with patch.object(MODULE, "run", side_effect=self.fake_run):
             MODULE.stage(self.args, self.folder, self.importer)
+        self.assertEqual((self.folder / "project/bin" / MODULE.EXTENSION).read_bytes(), self.extension.read_bytes())
         for name in ("AppRun", "EAWR", "EAWR (Safe render thread)", "EAWR Mods", "run.sh",
                      "eawr-launcher", "eawr_mods_service", "eawr_loadcheck", MODULE.GODOT_NAME):
             self.assertEqual((self.folder / name).stat().st_mode & 0o777, 0o755)
         self.assertEqual((self.folder / "run.sh").read_bytes(), (MODULE.release.ROOT / "run.sh").read_bytes())
-        self.assertFalse((self.folder / "tools").exists())
+        self.assertEqual((self.folder / "tools/eawr_online_test").read_bytes(), self.online_test.read_bytes())
+        self.assertEqual((self.folder / "tools/eawr_online_test").stat().st_mode & 0o777, 0o755)
         self.assertFalse((self.folder / "DEBUG-BUILD.md").exists())
         self.assertFalse((self.folder / "project/bin/foreign.dll").exists())
         self.assertFalse((self.folder / "project/.godot/stale").exists())
@@ -133,7 +141,7 @@ class LinuxPlayerTests(unittest.TestCase):
         self.assertEqual(manifest["platform"], "linux-x64")
         self.assertEqual(manifest["variant"], "player")
         self.assertNotIn("configuration", manifest)
-        self.assertEqual(len(manifest["elf_audit"]), 5)
+        self.assertEqual(len(manifest["elf_audit"]), 6)
         for line in (self.folder / "SHA256SUMS").read_text().splitlines():
             digest, name = line.split("  ", 1)
             self.assertEqual(digest, MODULE.release.sha256_file(self.folder / name))
@@ -267,7 +275,7 @@ class LinuxPlayerTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, "not built"):
             MODULE.debug_inputs(self.args, extension)
         elf(tool)
-        for stripped in (extension, tool):
+        for stripped in (extension, tool, self.online_test):
             def run(command, **kwargs):
                 if command[-1] == str(stripped) and command[1] == "--section-headers":
                     return " [1] .symtab SYMTAB\n [2] .debug_line PROGBITS"
@@ -283,7 +291,7 @@ class LinuxPlayerTests(unittest.TestCase):
                 MODULE.stage(self.args, self.folder, self.importer)
 
     def dirty_binaries(self):
-        binaries = [self.project / "bin" / MODULE.EXTENSION, self.service]
+        binaries = [self.project / "bin" / MODULE.EXTENSION, self.extension, self.service]
         if hasattr(self, "debug_extension"):
             binaries.append(self.debug_extension)
         for binary in binaries:
@@ -440,6 +448,7 @@ class LinuxPlayerTests(unittest.TestCase):
         self.enter(patch.object(MODULE, "import_project", self.importer))
         return ["--godot", str(self.godot), "--runtime-pin", str(self.pin), "--launcher", str(self.launcher),
                 "--mods-service", str(self.service), "--loadcheck", str(self.loadcheck),
+                "--online-test", str(self.online_test), "--viewer-build-dir", str(self.viewer_build),
                 "--appimagetool", str(self.cli_tool), "--appimagetool-sha256", MODULE.release.sha256_file(self.cli_tool),
                 "--appimage-runtime", str(self.cli_runtime),
                 "--appimage-runtime-sha256", MODULE.release.sha256_file(self.cli_runtime),
@@ -594,7 +603,7 @@ class LinuxPlayerTests(unittest.TestCase):
 
     def test_cli_debug_requires_both_build_directories(self):
         argv = self.prepare_cli()
-        for missing in ([], ["--build-dir", str(self.root)], ["--viewer-build-dir", str(self.root)]):
+        for missing in ([], ["--viewer-build-dir", str(self.root)]):
             with self.subTest(debug_missing=missing):
                 self.assertEqual(MODULE.main([*argv, "--debug", *missing]), 2)
 

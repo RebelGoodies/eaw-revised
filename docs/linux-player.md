@@ -44,7 +44,8 @@ The packager never configures or builds the root project and never uses stock Go
 - A patched editor reporting exactly `4.7.2.stable.eawr.fad06b579`.
 - A separately reviewed JSON runtime pin produced or recorded by the runtime builder.
 - The native launcher, `eawr_mods_service`, and adjacent `eawr_loadcheck` build outputs.
-- `apps/viewer/project/bin/libeawr_viewer.linux.template_release.x86_64.so`.
+- An online-enabled viewer build's `artifacts/Release/` snapshot.
+- The same commit's `eawr_online_test` connection-check executable from the relay/GNS root build.
 - A local appimagetool and its independently verified SHA256.
 - A local x86_64 type-2 AppImage runtime and its independently verified SHA256.
   Passing this runtime explicitly prevents appimagetool from downloading one.
@@ -82,14 +83,18 @@ EAWR_PLAYER="/path/to/player.AppImage" \
 ## Building the inputs
 
 Build from the repository root with a C++ toolchain, CMake, Ninja, Git, pkg-config, and GTK3 development files installed.
-On Debian or Ubuntu the GTK3 development package is `libgtk-3-dev`.
-Configure the native player targets and build all four executables.
+On Debian or Ubuntu install `libgtk-3-dev` and `libssl-dev`.
+OpenSSL 1.1.1 or newer supplies TLS and GNS crypto on Linux.
+Enable both existing online components in the root and independently configured viewer builds.
+The FETCH provider carries the pinned GNS version and TURN permission refresh patch used by Windows.
+Configure the native player targets and build the launcher tools and online connection check.
 
 ```sh
 cmake -S . -B out/build/linux-player -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DEAWR_BUILD_PLAYER=ON
+  -DCMAKE_BUILD_TYPE=Release -DEAWR_BUILD_PLAYER=ON \
+  -DEAWR_ENABLE_RELAY=ON -DEAWR_ENABLE_GNS=ON -DEAWR_GNS_PROVIDER=FETCH
 cmake --build out/build/linux-player --target \
-  eawr_launcher eawr_mods_start eawr_mods_service eawr_loadcheck --parallel 8
+  eawr_launcher eawr_mods_start eawr_mods_service eawr_loadcheck eawr_online_test --parallel 8
 ```
 
 Clone the patched Godot fork at its exact pinned revision, then run the runtime builder as an unprivileged user.
@@ -111,7 +116,8 @@ The binding revision below matches `apps/viewer/dependencies.json`.
 git clone https://github.com/godotengine/godot-cpp.git out/godot-cpp
 git -C out/godot-cpp checkout --detach 507ed9d840c01a3c5b2a39af8bb4000bfac30bf5
 cmake -S apps/viewer -B out/build/linux-viewer -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DEAWR_GODOT_CPP_ROOT="$PWD/out/godot-cpp"
+  -DCMAKE_BUILD_TYPE=Release -DEAWR_GODOT_CPP_ROOT="$PWD/out/godot-cpp" \
+  -DEAWR_ENABLE_RELAY=ON -DEAWR_ENABLE_GNS=ON -DEAWR_GNS_PROVIDER=FETCH
 cmake --build out/build/linux-viewer --target eawr_viewer --parallel 8
 ```
 
@@ -164,6 +170,8 @@ python3 tools/release/package_linux_player.py \
   --launcher "$NATIVE_LAUNCHER" \
   --mods-service "$NATIVE_BIN/eawr_mods_service" \
   --loadcheck "$NATIVE_BIN/eawr_loadcheck" \
+  --online-test "$PWD/out/build/linux-player/apps/online_test/eawr_online_test" \
+  --viewer-build-dir out/build/linux-viewer \
   --expect-identity "$PROJECT_COMMIT" \
   --appimagetool "$APPIMAGETOOL" \
   --appimagetool-sha256 "$APPIMAGETOOL_SHA256" \
@@ -179,6 +187,9 @@ Omit library roots and notices only if no extra libraries are needed.
 Copy resolved library files into those directories, rather than symlinks escaping to unrelated locations.
 The packager copies needed non-host libraries and their transitive dependencies into `lib/`.
 Supply their full license texts and required source offers in `--library-notices`.
+Include the approved OpenSSL `libssl` and `libcrypto` shared libraries in those roots when dynamically linked.
+GNS and Protobuf from the FETCH provider are linked statically and their notices are included by the existing license bundler.
+TLS system-CA mode uses the host's certificate trust store, which must be installed and current.
 It refuses dependencies found elsewhere, missing libraries, non-x86_64 ELFs, and non-relocatable RPATH or RUNPATH entries.
 Build inputs must be trusted because version probing, importing and `ldd` execute them.
 
@@ -208,6 +219,8 @@ python3 tools/release/package_linux_player.py \
   --launcher "$NATIVE_LAUNCHER" \
   --mods-service "$NATIVE_BIN/eawr_mods_service" \
   --loadcheck "$NATIVE_BIN/eawr_loadcheck" \
+  --online-test "$PWD/out/build/linux-player/apps/online_test/eawr_online_test" \
+  --viewer-build-dir out/build/linux-viewer \
   --expect-identity "$PROJECT_COMMIT" \
   --appimagetool "$APPIMAGETOOL" \
   --appimagetool-sha256 "$APPIMAGETOOL_SHA256" \
@@ -232,17 +245,20 @@ Build the Debug inputs separately so later Release builds cannot replace their p
 
 ```sh
 cmake -S . -B out/build/rootDebug -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug -DEAWR_BUILD_PLAYER=ON
+  -DCMAKE_BUILD_TYPE=Debug -DEAWR_BUILD_PLAYER=ON \
+  -DEAWR_ENABLE_RELAY=ON -DEAWR_ENABLE_GNS=ON -DEAWR_GNS_PROVIDER=FETCH
 cmake --build out/build/rootDebug --parallel 8
 cmake -S apps/viewer -B out/build/viewerDebug -G Ninja \
-  -DCMAKE_BUILD_TYPE=Debug -DEAWR_GODOT_CPP_ROOT="$PWD/out/godot-cpp"
+  -DCMAKE_BUILD_TYPE=Debug -DEAWR_GODOT_CPP_ROOT="$PWD/out/godot-cpp" \
+  -DEAWR_ENABLE_RELAY=ON -DEAWR_ENABLE_GNS=ON -DEAWR_GNS_PROVIDER=FETCH
 cmake --build out/build/viewerDebug --target eawr_viewer --parallel 8
 NATIVE_LAUNCHER="$PWD/out/build/rootDebug/apps/launcher/eawr-launcher"
 NATIVE_BIN="$PWD/out/build/rootDebug/apps/mods_service"
 ```
 
 The viewer build preserves its extension under `artifacts/Debug/` inside its build directory.
-Debug packaging uses that snapshot instead of the shared `project/bin` copy.
+For Debug packaging, also use `--online-test out/build/rootDebug/apps/online_test/eawr_online_test`.
+Both player and Debug packaging use their configuration-local snapshot instead of the shared `project/bin` copy.
 Rebuild older viewer builds with `--clean-first` if their snapshot is missing.
 The extension and every headless tool retain embedded DWARF and are rejected if `.debug_info` or `.debug_line` is missing.
 The generated package includes `DEBUG-BUILD.md`; Linux Debug packages do not use PDB files.
@@ -263,6 +279,7 @@ run.sh
 eawr-launcher
 eawr_mods_service
 eawr_loadcheck
+tools/eawr_online_test           # headless connection check, also included in player packages
 godot/Godot_v4.7.2-stable_linux.x86_64
 project/                         # includes preimported .godot and the Linux extension
 lib/                            # approved shared-library closure
@@ -310,3 +327,30 @@ python3 tools/release/fresh_user/run_linux_fresh_user.py \
 
 Before publishing, test the actual image on the minimum supported distribution, both mounted and extracted, with the project files read-only.
 Check normal startup, safe render-thread startup, game-path selection, font extraction, mod-service startup, and a representative scene.
+
+## Online play and native cross-play
+
+Set the organizer's service address, port and TLS trust in **Network Options**, then use **Online** to host or join a room.
+Linux and Windows native project players use the same service, GNS transport and deterministic lockstep protocol.
+Use builds from the same clean project commit and matching effective game/mod data on every peer.
+Keep the same player or Debug configuration for comparable timing.
+Original retail clients cannot join these matches.
+No public service is supplied by the AppImage.
+
+The bundled headless check needs no game data or graphics desktop.
+From an extracted AppDir, run the existing host/join tool against the same service on Linux and Windows.
+Use the real address and approved certificate fingerprint supplied by the organizer.
+
+```sh
+LD_LIBRARY_PATH="$PWD/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  ./tools/eawr_online_test host --address "$SERVICE" --port 27020 --pin "$CERT_SHA256" --log host.log
+LD_LIBRARY_PATH="$PWD/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  ./tools/eawr_online_test join --address "$SERVICE" --port 27020 --pin "$CERT_SHA256" --code ABCD --log join.log
+```
+
+Replace `ABCD` with the code printed by the host.
+Add `--turn-only` to both commands to check the relay path.
+Before release, test Linux hosting with Windows joining and the reverse, then complete a viewer match with matching data.
+Check direct and relay-only routes, run past ten minutes, exercise connection repair, and retain both peers' logs and desync reports.
+Follow the [online playtest runbook](net-online-playtest.md) for multi-network and multi-seat qualification.
+Source CI runs the online and replay-golden tests on both platforms, but it does not qualify a live mixed-OS match.

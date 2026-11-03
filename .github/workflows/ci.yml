@@ -107,7 +107,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ninja-build g++-14 clang-18
           if [[ "$RUNNER_ARCH" == "X64" ]]; then
-            sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config
+            sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config libssl-dev
           fi
 
       - name: Install the macOS toolchain
@@ -136,6 +136,7 @@ jobs:
           variables = {"CMAKE_BUILD_TYPE": config, "EAWR_DEBUG_SYMBOLS": "OFF"}
           if os.environ["RUNNER_ARCH"] == "X64":
               variables["EAWR_BUILD_PLAYER"] = "ON"
+              variables.update(EAWR_ENABLE_GNS="ON", EAWR_ENABLE_RELAY="ON", EAWR_GNS_PROVIDER="FETCH")
           Path("CMakeUserPresets.json").write_text(json.dumps({
               "version": 6,
               "configurePresets": [{"name": name, "inherits": preset,
@@ -213,18 +214,18 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ninja-build g++-14
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 libssl-dev
 
       - name: Build the viewer extension (Linux)
         if: ${{ runner.os == 'Linux' }}
         run: |
-          cmake -S apps/viewer -B out/build/viewer-${{ matrix.config }} -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DCMAKE_CXX_COMPILER=g++-14
+          cmake -S apps/viewer -B out/build/viewer-${{ matrix.config }} -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -DCMAKE_CXX_COMPILER=g++-14 -DEAWR_ENABLE_GNS=ON -DEAWR_ENABLE_RELAY=ON -DEAWR_GNS_PROVIDER=FETCH
           cmake --build out/build/viewer-${{ matrix.config }} --config ${{ matrix.config }} --target eawr_viewer
 
       - name: Build the viewer extension (Windows)
         if: ${{ runner.os == 'Windows' }}
         run: |
-          cmake -S apps/viewer -B out/build/viewer-${{ matrix.config }} -G "Visual Studio 17 2022" -A x64
+          cmake -S apps/viewer -B out/build/viewer-${{ matrix.config }} -G "Visual Studio 17 2022" -A x64 -DEAWR_ENABLE_GNS=ON -DEAWR_ENABLE_RELAY=ON -DEAWR_GNS_PROVIDER=FETCH
           cmake --build out/build/viewer-${{ matrix.config }} --config ${{ matrix.config }} --target eawr_viewer
 
       - name: The extension is where the Godot project loads it

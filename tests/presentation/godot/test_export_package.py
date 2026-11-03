@@ -122,9 +122,12 @@ class ExportPackageGuardTests(unittest.TestCase):
     def test_every_pinned_licence_file_names_a_url_and_hash(self):
         items = MODULE.pinned_license_files()
         self.assertEqual({item["name"] for item in items},
-                         {"godot-LICENSE.txt", "godot-COPYRIGHT.txt", "godot-cpp-LICENSE.md"})
+                         {"godot-LICENSE.txt", "godot-COPYRIGHT.txt", "godot-cpp-LICENSE.md",
+                          "GameNetworkingSockets-LICENSE.txt", "protobuf-LICENSE.txt"})
         for item in items:
-            self.assertTrue(item["url"].startswith("https://raw.githubusercontent.com/godotengine/"))
+            self.assertRegex(item["url"], r"^https://raw\.githubusercontent\.com/"
+                             r"(?:godotengine/(?:godot|godot-cpp)|ValveSoftware/GameNetworkingSockets|"
+                             r"protocolbuffers/protobuf)/[0-9a-f]{40}/")
             self.assertRegex(item["sha256"], "^[0-9a-f]{64}$")
 
     def test_pinned_smoke_engine_versions_are_accepted(self):

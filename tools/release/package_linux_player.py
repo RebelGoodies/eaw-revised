@@ -278,7 +278,7 @@ def debug_inputs(args, extension: Path) -> list[Path]:
         raise ValueError(f"missing Debug viewer snapshot: {extension}; rebuild eawr_viewer in --viewer-build-dir "
                          "(use --clean-first if the target is up to date)")
     tools = [release.find_tool(args.build_dir, name, "", "Debug") for name in release.TOOLS]
-    for binary in (extension, *tools):
+    for binary in (extension, args.online_test, *tools):
         if not is_elf(binary):
             raise ValueError(f"Debug binary must be a Linux x86_64 ELF: {binary}")
         sections = run(["readelf", "--section-headers", "--wide", str(binary)])
@@ -348,11 +348,11 @@ def stage(args, folder: Path, importer=None) -> None:
     if args.with_mods_manager:
         raise ValueError("--with-mods-manager is blocked until the private manager is validated on Linux")
     runtime_pin = verify_runtime(args.godot, args.runtime_pin, args.library_root)
-    extension = release.VIEWER_PROJECT / "bin" / EXTENSION
-    if args.debug and args.viewer_build_dir is not None:
-        extension = args.viewer_build_dir / "artifacts/Debug" / EXTENSION
+    configuration = "Debug" if args.debug else "Release"
+    extension = args.viewer_build_dir / "artifacts" / configuration / EXTENSION
     tools = debug_inputs(args, extension)
-    binaries = [(extension, True), (args.launcher, False), (args.mods_service, True), (args.loadcheck, False)]
+    binaries = [(extension, True), (args.launcher, False), (args.mods_service, True), (args.loadcheck, False),
+                (args.online_test, False)]
     binaries.extend((tool, False) for tool in tools)
     build_dirty = verify_player_identity(args.expect_identity, binaries, args.development)
     for source, name in ((args.godot, GODOT_NAME), (args.launcher, "eawr-launcher"),
@@ -360,6 +360,7 @@ def stage(args, folder: Path, importer=None) -> None:
         copy_executable(source, folder / name)
     for tool in tools:
         copy_executable(tool, folder / "tools" / tool.name)
+    copy_executable(args.online_test, folder / "tools" / "eawr_online_test")
     project = folder / "project"
     copy_viewer_project(project, extension)
     check_hash(folder / GODOT_NAME, runtime_pin["sha256"])
@@ -387,7 +388,7 @@ def import_project(godot: Path, project: Path) -> str:
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("godot", "runtime-pin", "launcher", "mods-service", "loadcheck", "appimagetool", "appimage-runtime"):
+    for name in ("godot", "runtime-pin", "launcher", "mods-service", "loadcheck", "online-test", "appimagetool", "appimage-runtime"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--appimagetool-sha256", required=True)
     parser.add_argument("--appimage-runtime-sha256", required=True, help="local type-2 runtime, disables runtime downloads")
@@ -396,7 +397,7 @@ def parse_args(argv):
                          help="package matching local dirty builds as explicitly named development artifacts")
     parser.add_argument("--debug", action="store_true", help="package the Debug viewer and headless tools with embedded DWARF")
     parser.add_argument("--build-dir", type=Path, help="root tools build configured with CMAKE_BUILD_TYPE=Debug")
-    parser.add_argument("--viewer-build-dir", type=Path, help="viewer build configured with CMAKE_BUILD_TYPE=Debug")
+    parser.add_argument("--viewer-build-dir", type=Path, required=True, help="viewer build containing the artifacts/Release or artifacts/Debug snapshot")
     parser.add_argument("--version", required=True)
     parser.add_argument("--out", type=Path, default=release.ROOT / "out/release")
     parser.add_argument("--library-root", type=Path, action="append", default=[], help="repeat for flat library directories")
@@ -413,7 +414,7 @@ def validate_packaging_inputs(args) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", args.version):
         raise ValueError("--version must be a filename-safe version")
     args.out = args.out.resolve()
-    for name in ("godot", "runtime_pin", "launcher", "mods_service", "loadcheck", "appimagetool", "appimage_runtime"):
+    for name in ("godot", "runtime_pin", "launcher", "mods_service", "loadcheck", "online_test", "appimagetool", "appimage_runtime"):
         setattr(args, name, getattr(args, name).resolve(strict=True))
     tool_hash = check_hash(args.appimagetool, args.appimagetool_sha256)
     appimage_runtime_hash = check_hash(args.appimage_runtime, args.appimage_runtime_sha256)

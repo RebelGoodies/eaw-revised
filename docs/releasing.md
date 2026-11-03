@@ -249,6 +249,10 @@ carry a source/build/hash receipt; do not claim a hosted attestation for these b
 ### Linux player and Debug artifacts
 
 Build Linux AppImages with `tools/release/package_linux_player.py`.
+Both root and viewer builds enable `EAWR_ENABLE_RELAY=ON`, `EAWR_ENABLE_GNS=ON` and `EAWR_GNS_PROVIDER=FETCH`.
+Pass `--viewer-build-dir` and `--online-test` for player and Debug packages.
+The packager uses these prebuilt inputs and audits the bundled OpenSSL dependency closure.
+Follow [Linux player packaging and cross-play verification](linux-player.md) before publishing, including mixed native Linux/Windows host/join and relay-only matches.
 For Debug, pass `--debug --build-dir <rootDebug> --viewer-build-dir <viewerDebug>`; both build caches must be configured as Debug.
 The extension and every headless tool carry embedded DWARF, not PDBs, and the package includes `DEBUG-BUILD.md`.
 The canonical output is `eaw-revised-<version>-linux-x64-debug.AppImage`, with a matching AppDir and SHA256 sidecar.

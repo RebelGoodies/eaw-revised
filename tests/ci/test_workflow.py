@@ -59,6 +59,9 @@ class WorkflowCoverage(unittest.TestCase):
                 self.assertEqual(preset["cacheVariables"]["EAWR_DEBUG_SYMBOLS"], "OFF")
                 if arch == "X64":
                     self.assertEqual(preset["cacheVariables"]["EAWR_BUILD_PLAYER"], "ON")
+                    for key in ("EAWR_ENABLE_GNS", "EAWR_ENABLE_RELAY"):
+                        self.assertEqual(preset["cacheVariables"][key], "ON")
+                    self.assertEqual(preset["cacheVariables"]["EAWR_GNS_PROVIDER"], "FETCH")
 
     def test_viewer_builds_both_configurations_on_both_platforms(self):
         job = self.workflow["jobs"]["viewer"]
@@ -70,6 +73,8 @@ class WorkflowCoverage(unittest.TestCase):
             step = next(step for step in job["steps"] if step["name"] == f"Build the viewer extension ({platform})")
             self.assertIn("-B out/build/viewer-${{ matrix.config }}", step["run"])
             self.assertIn("--config ${{ matrix.config }} --target eawr_viewer", step["run"])
+            for flag in ("-DEAWR_ENABLE_GNS=ON", "-DEAWR_ENABLE_RELAY=ON", "-DEAWR_GNS_PROVIDER=FETCH"):
+                self.assertIn(flag, step["run"])
             if platform == "Linux":
                 self.assertIn("-DCMAKE_BUILD_TYPE=${{ matrix.config }}", step["run"])
 
