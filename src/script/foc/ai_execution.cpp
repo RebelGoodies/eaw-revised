@@ -243,7 +243,7 @@ void Engine::service_execution(PlayerAi& player, const bool direct_pad_only) {
                 buy.verb = std::string(option->kind == tactical::BuildKind::structure ? verb_pad_build : verb_buy);
                 buy.arguments = {Value::number(real(player.player)), Value{authoritative::Handle{handle_game_object, task.producer}},
                     Value{authoritative::Handle{handle_type, task.type}}};
-                if (!task.pad_build) buy.arguments.push_back(Value{task.prepaid});
+                if (!task.pad_build) buy.arguments.emplace_back(task.prepaid);
                 queue_order(std::move(buy));
                 task.issued = static_cast<std::uint64_t>(frame_);
                 task.child_floor = host_->ai_world->next_entity_id();

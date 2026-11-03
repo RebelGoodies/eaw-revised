@@ -567,6 +567,8 @@ void production_lifecycle() {
         const auto orders = ai::EngineContractAccess::take_orders(ordinary);
         expect(orders.size() == 1, label + ": AI emits one purchase");
         for (const auto& command : orders) {
+            expect(command.arguments.size() == 4 && std::holds_alternative<bool>(command.arguments[3].data)
+                && !std::get<bool>(command.arguments[3].data), label + ": ordinary purchase carries Boolean false, not nil or a number");
             const auto order = foc::tactical_ai_detail::translate_order(command);
             expect(order && order.value().issuer == 1 && order.value().units == std::vector<eawr::sim::EntityId>{1}
                 && std::holds_alternative<t::BuyPayload>(order.value().payload), label + ": buyer and chosen factory reach BuyPayload");
@@ -1132,6 +1134,9 @@ void spending_wallet_reservations() {
         t::TacticalReplay replay; replay.setup = start;
         const auto deliver = [&] {
             for (const auto& command : ai::EngineContractAccess::take_orders(engine)) {
+                if (command.verb == foc::verb_buy)
+                    expect(command.arguments.size() == 4 && std::holds_alternative<bool>(command.arguments[3].data)
+                        && std::get<bool>(command.arguments[3].data), "WAS-26: reserved purchase carries Boolean true, not nil or a number");
                 const auto order = foc::tactical_ai_detail::translate_order(command);
                 expect(static_cast<bool>(order), "WAS-25/26: reservation/refund/prepaid command translates");
                 if (!order) continue;
